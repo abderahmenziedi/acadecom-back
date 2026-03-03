@@ -1,0 +1,29 @@
+// Configuration du générateur du client Prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Source de données : MySQL
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Enum des rôles disponibles dans l'application
+enum Role {
+  USER      // Utilisateur standard (compte personnel)
+  VISITEUR  // Accès limité en lecture seule (compte invité)
+  BRAND     // Marque/Entreprise avec accès spécifique
+  ADMIN     // Administrateur avec accès total (créé manuellement)
+}
+
+// Modèle utilisateur principal
+model User {
+  id        Int      @id @default(autoincrement()) // Identifiant unique auto-incrémenté
+  email     String   @unique                       // Email unique (utilisé pour la connexion)
+  password  String                                 // Mot de passe hashé (bcrypt)
+  role      Role     @default(VISITEUR)            // Rôle par défaut : VISITEUR
+  createdAt DateTime @default(now())               // Date de création automatique
+
+  @@map("users") // Nom de la table en base de données
+}
