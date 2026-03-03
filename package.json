@@ -1,9 +1,13 @@
 {
   "name": "acadecom-back",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "AcademCom Authentication Backend API",
+  "main": "src/server.js",
   "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "db:reset": "npx prisma migrate reset",
+    "db:push": "npx prisma db push",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -19,7 +23,6 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
-    "mysql2": "^3.18.2",
     "prisma": "^6.19.2",
     "winston": "^3.19.0",
     "zod": "^4.3.6"

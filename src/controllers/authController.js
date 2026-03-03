@@ -8,7 +8,7 @@ const AuthService = require("../services/authService");
 const AuthController = {
     /**
      * POST /api/v1/auth/register
-     * Accessible à tous. Crée un USER, VISITEUR ou BRAND.
+     * Accessible à tous. Crée un utilisateur avec rôle (participant, brand, quizmaster, admin).
      */
     async register(req, res, next) {
         try {
@@ -25,7 +25,7 @@ const AuthController = {
 
     /**
      * POST /api/v1/auth/login
-     * Accessible à tous les rôles (USER, VISITEUR, BRAND, ADMIN).
+     * Accessible à tous les rôles (participant, brand, quizmaster, admin).
      */
     async login(req, res, next) {
         try {
@@ -34,6 +34,23 @@ const AuthController = {
                 status: "success",
                 token,
                 data: { user },
+            });
+        } catch (err) {
+            next(err);
+        }
+    },
+
+    /**
+     * POST /api/v1/auth/logout
+     * Accessible aux utilisateurs authentifiés.
+     * JWT étant stateless, c'est juste une confirmation client-side.
+     */
+    async logout(req, res, next) {
+        try {
+            const result = await AuthService.logout(req.user.id);
+            res.status(200).json({
+                status: "success",
+                message: result.message,
             });
         } catch (err) {
             next(err);

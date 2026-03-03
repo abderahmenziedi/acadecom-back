@@ -3,7 +3,14 @@ const ApiError = require("../utils/ApiError");
 /**
  * Middleware de contrôle d'accès basé sur les rôles (RBAC).
  * À utiliser APRÈS le middleware `auth`.
- * @param {...string} allowedRoles - Les rôles autorisés (ex: "ADMIN", "BRAND")
+ * 
+ * Rôles disponibles:
+ * - participant: Utilisateur standard
+ * - brand: Représentant de marque
+ * - quizmaster: Maître de quiz (lié à une brand)
+ * - admin: Administrateur système
+ * 
+ * @param {...string} allowedRoles - Les rôles autorisés (ex: "admin", "brand")
  */
 function permit(...allowedRoles) {
   return (req, res, next) => {
