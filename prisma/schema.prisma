@@ -20,9 +20,11 @@ enum Role {
 // Modèle utilisateur principal
 model User {
   id            Int      @id @default(autoincrement())                    // Identifiant unique auto-incrémenté
+  name          String?                                                   // Nom affiché (optionnel)
   email         String   @unique                                          // Email unique (utilisé pour la connexion)
   password      String                                                    // Mot de passe hashé (bcrypt)
   role          Role     @default(participant)                            // Rôle par défaut : participant
+  isBlocked     Boolean  @default(false)                                  // Compte bloqué par l'admin
   brandId       Int?                                                      // ID de l'utilisateur brand (si rôle = quizmaster)
   brand         User?    @relation("quizmasterToBrand", fields: [brandId], references: [id]) // Relation vers le brand
   quizmasters   User[]   @relation("quizmasterToBrand")                   // Quizmasters associés à ce brand

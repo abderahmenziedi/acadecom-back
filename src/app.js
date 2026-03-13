@@ -20,6 +20,7 @@ require("dotenv").config();
 
 // Routes
 const authRoutes = require("./routes/auth");
+const adminRoutes = require("./routes/admin.routes");
 
 // Middlewares
 const auth = require("./middlewares/auth");
@@ -56,6 +57,11 @@ app.get("/", (req, res) => {
             register: "POST /api/v1/auth/register",
             login: "POST /api/v1/auth/login",
             logout: "POST /api/v1/auth/logout",
+            adminUsers: "GET /api/admin/users",
+            adminBlock: "PATCH /api/admin/users/:id/block",
+            adminUnblock: "PATCH /api/admin/users/:id/unblock",
+            adminDelete: "DELETE /api/admin/users/:id",
+            adminExportCsv: "GET /api/admin/users/export/csv",
         },
     });
 });
@@ -72,6 +78,9 @@ app.get("/health", (req, res) => {
 
 // Routes authentification
 app.use("/api/v1/auth", authRoutes);
+
+// Routes admin (protégées JWT + rôle admin)
+app.use("/api/admin", adminRoutes);
 
 // ─── 5. Routes protégées (exemples) ──────────────────────────────────────────
 

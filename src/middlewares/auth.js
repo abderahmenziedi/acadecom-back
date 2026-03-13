@@ -7,8 +7,13 @@ const ApiError = require("../utils/ApiError");
  * En cas de succès, attache req.user = { id, role }.
  */
 function auth(req, res, next) {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.startsWith("Bearer ") && authHeader.split(" ")[1];
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return next(new ApiError(401, "Accès refusé : token manquant"));
+  }
+
+  const token = authHeader.split(" ")[1];
 
   if (!token) {
     return next(new ApiError(401, "Accès refusé : token manquant"));

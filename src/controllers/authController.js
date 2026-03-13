@@ -32,8 +32,7 @@ const AuthController = {
             const { token, user } = await AuthService.login(req.body);
             res.status(200).json({
                 status: "success",
-                token,
-                data: { user },
+                data: { token, user },
             });
         } catch (err) {
             next(err);

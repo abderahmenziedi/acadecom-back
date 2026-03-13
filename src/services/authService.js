@@ -80,6 +80,11 @@ const AuthService = {
             throw new ApiError(401, "Identifiants invalides");
         }
 
+        // Vérifier si le compte est bloqué par un administrateur
+        if (user.isBlocked) {
+            throw new ApiError(403, "Votre compte a été suspendu. Veuillez contacter un administrateur.");
+        }
+
         // Pour les quizmasters, inclure les détails de la brand
         let brand = undefined;
         if (user.role === "quizmaster" && user.brandId) {

@@ -1,0 +1,750 @@
+{
+  "info": {
+    "_postman_id": "acadecom-backend-2026",
+    "name": "AcademCom Backend API",
+    "description": "Collection de tests complète pour l'API Backend AcademCom avec authentification multi-rôles et gestion admin",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "🏠 Health & Welcome",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Vérifier la santé du serveur"
+          },
+          "response": []
+        },
+        {
+          "name": "Welcome",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "Message de bienvenue et endpoints disponibles"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🔐 Authentication",
+      "item": [
+        {
+          "name": "Register - Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"AdminPass123\",\n  \"role\": \"admin\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register"]
+            },
+            "description": "S'inscrire en tant qu'admin"
+          },
+          "response": []
+        },
+        {
+          "name": "Register - Participant",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"participant@example.com\",\n  \"password\": \"UserPass123\",\n  \"role\": \"participant\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register"]
+            },
+            "description": "S'inscrire en tant que participant"
+          },
+          "response": []
+        },
+        {
+          "name": "Register - Brand",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"brand@example.com\",\n  \"password\": \"BrandPass123\",\n  \"role\": \"brand\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register"]
+            },
+            "description": "S'inscrire en tant que brand"
+          },
+          "response": []
+        },
+        {
+          "name": "Register - Quizmaster",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"quizmaster@example.com\",\n  \"password\": \"QuizPass123\",\n  \"role\": \"quizmaster\",\n  \"brandId\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register"]
+            },
+            "description": "S'inscrire en tant que quizmaster (brandId obligatoire)"
+          },
+          "response": []
+        },
+        {
+          "name": "Login - Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"AdminPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Connexion admin - Récupère le JWT token"
+          },
+          "response": []
+        },
+        {
+          "name": "Login - Participant",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"participant@example.com\",\n  \"password\": \"UserPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Connexion participant"
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "logout"]
+            },
+            "description": "Déconnexion (token requis)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "👨‍💼 Admin - User Management",
+      "item": [
+        {
+          "name": "1. Get All Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users?limit=10&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Lister tous les utilisateurs avec pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "1. Get All Users - Filter by Role (participant)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users?role=participant&limit=10&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users"],
+              "query": [
+                {
+                  "key": "role",
+                  "value": "participant"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Lister les utilisateurs filtrés par rôle (participant)"
+          },
+          "response": []
+        },
+        {
+          "name": "1. Get All Users - Filter by Role (admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users?role=admin",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users"],
+              "query": [
+                {
+                  "key": "role",
+                  "value": "admin"
+                }
+              ]
+            },
+            "description": "Lister les admins"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Block User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/2/block",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "2", "block"]
+            },
+            "description": "Bloquer un utilisateur (ID: 2) - L'utilisateur ne peut plus se connecter"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Block User - Try Login (should fail)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"participant@example.com\",\n  \"password\": \"UserPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Essayer de se connecter avec un compte bloqué (doit échouer avec 403)"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Unblock User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/2/unblock",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "2", "unblock"]
+            },
+            "description": "Débloquer un utilisateur (ID: 2) - Il peut à nouveau se connecter"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Unblock - Try Login (should succeed)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"participant@example.com\",\n  \"password\": \"UserPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Se connecter après déblocage (doit réussir)"
+          },
+          "response": []
+        },
+        {
+          "name": "4. Delete User",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/2",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "2"]
+            },
+            "description": "Supprimer définitivement un utilisateur (ID: 2)"
+          },
+          "response": []
+        },
+        {
+          "name": "5. Export Users to CSV",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/export/csv",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "export", "csv"]
+            },
+            "description": "Exporter tous les utilisateurs en fichier CSV - Téléchargement automatique"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🔒 Security Tests",
+      "item": [
+        {
+          "name": "Test - Access Admin Route Without Token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users"]
+            },
+            "description": "Essayer d'accéder aux routes admin sans token JWT (doit retourner 401)"
+          },
+          "response": []
+        },
+        {
+          "name": "Test - Access Admin Route With Participant Token",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{participant_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users"]
+            },
+            "description": "Essayer d'accéder aux routes admin avec un token participant (doit retourner 403)"
+          },
+          "response": []
+        },
+        {
+          "name": "Test - Admin Cannot Block Self",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/1/block",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "1", "block"]
+            },
+            "description": "Essayer de se bloquer soi-même (doit retourner 403)"
+          },
+          "response": []
+        },
+        {
+          "name": "Test - Invalid User ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/invalid",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "invalid"]
+            },
+            "description": "Essayer avec un ID invalide (doit retourner 400)"
+          },
+          "response": []
+        },
+        {
+          "name": "Test - Non-Existent User ID",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/99999/block",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "99999", "block"]
+            },
+            "description": "Essayer de bloquer un utilisateur inexistant (doit retourner 404)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "📊 Testing Workflow",
+      "item": [
+        {
+          "name": "1️⃣ Register Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin_workflow@example.com\",\n  \"password\": \"AdminPass123\",\n  \"role\": \"admin\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register"]
+            },
+            "description": "Étape 1: Créer un compte admin"
+          },
+          "response": []
+        },
+        {
+          "name": "2️⃣ Register Participant",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user_workflow@example.com\",\n  \"password\": \"UserPass123\",\n  \"role\": \"participant\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register"]
+            },
+            "description": "Étape 2: Créer un compte participant"
+          },
+          "response": []
+        },
+        {
+          "name": "3️⃣ Admin Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin_workflow@example.com\",\n  \"password\": \"AdminPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Étape 3: Admin se connecte - COPIER LE TOKEN DANS {{admin_token}}"
+          },
+          "response": []
+        },
+        {
+          "name": "4️⃣ Participant Login (Before Block)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user_workflow@example.com\",\n  \"password\": \"UserPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Étape 4: Participant se connecte (avant blocage)"
+          },
+          "response": []
+        },
+        {
+          "name": "5️⃣ Admin Lists All Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users"]
+            },
+            "description": "Étape 5: Admin liste tous les utilisateurs - GET USER ID"
+          },
+          "response": []
+        },
+        {
+          "name": "6️⃣ Admin Blocks User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/3/block",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "3", "block"]
+            },
+            "description": "Étape 6: Admin bloque le participant (changer ID selon user ID)"
+          },
+          "response": []
+        },
+        {
+          "name": "7️⃣ Participant Login (After Block - Fails)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user_workflow@example.com\",\n  \"password\": \"UserPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Étape 7: Participant essaie de se connecter (blocage = FAIL)"
+          },
+          "response": []
+        },
+        {
+          "name": "8️⃣ Admin Unblocks User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/3/unblock",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "3", "unblock"]
+            },
+            "description": "Étape 8: Admin débloque le participant"
+          },
+          "response": []
+        },
+        {
+          "name": "9️⃣ Participant Login (After Unblock - Succeeds)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user_workflow@example.com\",\n  \"password\": \"UserPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Étape 9: Participant se connecte (déblocage = SUCCESS)"
+          },
+          "response": []
+        },
+        {
+          "name": "🔟 Admin Exports to CSV",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/export/csv",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "export", "csv"]
+            },
+            "description": "Étape 10: Admin exporte tous les users en CSV"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "YOUR_ADMIN_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "participant_token",
+      "value": "YOUR_PARTICIPANT_JWT_TOKEN_HERE",
+      "type": "string"
+    }
+  ]
+}
