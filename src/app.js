@@ -21,6 +21,8 @@ require("dotenv").config();
 // Routes
 const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin.routes");
+const brandRoutes = require("./routes/brand.routes");
+const quizmasterRoutes = require("./routes/quizmaster.routes");
 
 // Middlewares
 const auth = require("./middlewares/auth");
@@ -82,6 +84,10 @@ app.use("/api/v1/auth", authRoutes);
 // Routes admin (protégées JWT + rôle admin)
 app.use("/api/admin", adminRoutes);
 
+// Routes admin — Gestion des brands et quizmasters
+app.use("/api/v1/admin/brands", brandRoutes);
+app.use("/api/v1/admin/quizmasters", quizmasterRoutes);
+
 // ─── 5. Routes protégées (exemples) ──────────────────────────────────────────
 
 // Accessible uniquement aux admin
@@ -94,7 +100,7 @@ app.get("/api/v1/dashboard", auth, permit("participant", "brand", "quizmaster", 
     res.json({ status: "success", message: `Bienvenue, vous êtes connecté en tant que ${req.user.role}` });
 });
 
-// Accessible aux brand et admin
+// Accessible aux brand et adminAuthorization: Bearer <token>
 app.get("/api/v1/brand", auth, permit("brand", "admin"), (req, res) => {
     res.json({ status: "success", message: "Espace Brand / Admin" });
 });

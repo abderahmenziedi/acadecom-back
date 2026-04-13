@@ -728,6 +728,453 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "🏢 Admin - Brands Management",
+      "item": [
+        {
+          "name": "1. Create Brand",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"TechCorp\",\n  \"email\": \"contact@techcorp.com\",\n  \"password\": \"BrandPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands"]
+            },
+            "description": "Créer un nouveau brand (admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Create Brand - Duplicate Email (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"TechCorp Duplicate\",\n  \"email\": \"contact@techcorp.com\",\n  \"password\": \"BrandPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands"]
+            },
+            "description": "Tenter de créer un brand avec un email déjà utilisé → 409"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Create Brand - Validation Error (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"A\",\n  \"email\": \"invalid-email\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands"]
+            },
+            "description": "Tenter de créer un brand avec des données invalides → 400"
+          },
+          "response": []
+        },
+        {
+          "name": "4. Get All Brands (Paginated)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Lister tous les brands avec pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "5. Get Brand by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands", "1"]
+            },
+            "description": "Récupérer un brand par son ID (inclut ses quizmasters)"
+          },
+          "response": []
+        },
+        {
+          "name": "6. Get Brand - Not Found (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands/99999",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands", "99999"]
+            },
+            "description": "Tenter de récupérer un brand inexistant → 404"
+          },
+          "response": []
+        },
+        {
+          "name": "7. Update Brand",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"TechCorp Updated\",\n  \"email\": \"new@techcorp.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands", "1"]
+            },
+            "description": "Mettre à jour le nom et l'email d'un brand"
+          },
+          "response": []
+        },
+        {
+          "name": "8. Update Brand - Change Password",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"NewBrandPass456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands", "1"]
+            },
+            "description": "Changer le mot de passe d'un brand"
+          },
+          "response": []
+        },
+        {
+          "name": "9. Delete Brand",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands", "1"]
+            },
+            "description": "Supprimer un brand (échoue si des quizmasters sont liés → 409)"
+          },
+          "response": []
+        },
+        {
+          "name": "10. No Token (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/brands",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "brands"]
+            },
+            "description": "Accéder sans token JWT → 401"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🧠 Admin - Quizmasters Management",
+      "item": [
+        {
+          "name": "1. Create Quizmaster",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Quiz\",\n  \"email\": \"alice@quiz.com\",\n  \"password\": \"QuizPass123\",\n  \"brandId\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters"]
+            },
+            "description": "Créer un quizmaster lié à un brand (admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Create Quizmaster - Missing brandId (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bob Quiz\",\n  \"email\": \"bob@quiz.com\",\n  \"password\": \"QuizPass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters"]
+            },
+            "description": "Créer un quizmaster sans brandId → 400 validation error"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Create Quizmaster - Invalid brandId (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Charlie Quiz\",\n  \"email\": \"charlie@quiz.com\",\n  \"password\": \"QuizPass123\",\n  \"brandId\": 99999\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters"]
+            },
+            "description": "Créer un quizmaster avec un brandId inexistant → 404"
+          },
+          "response": []
+        },
+        {
+          "name": "4. Create Quizmaster - Duplicate Email (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Duplicate\",\n  \"email\": \"alice@quiz.com\",\n  \"password\": \"QuizPass123\",\n  \"brandId\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters"]
+            },
+            "description": "Créer un quizmaster avec un email déjà utilisé → 409"
+          },
+          "response": []
+        },
+        {
+          "name": "5. Get All Quizmasters (Paginated)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Lister tous les quizmasters avec pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "6. Get Quizmasters - Filter by brandId",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters?brandId=1&page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters"],
+              "query": [
+                { "key": "brandId", "value": "1" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Lister les quizmasters filtrés par brandId"
+          },
+          "response": []
+        },
+        {
+          "name": "7. Get Quizmaster by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters", "1"]
+            },
+            "description": "Récupérer un quizmaster par son ID"
+          },
+          "response": []
+        },
+        {
+          "name": "8. Get Quizmaster - Not Found (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters/99999",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters", "99999"]
+            },
+            "description": "Tenter de récupérer un quizmaster inexistant → 404"
+          },
+          "response": []
+        },
+        {
+          "name": "9. Update Quizmaster",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Quiz Updated\",\n  \"email\": \"alice.updated@quiz.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters", "1"]
+            },
+            "description": "Mettre à jour le nom et l'email d'un quizmaster"
+          },
+          "response": []
+        },
+        {
+          "name": "10. Update Quizmaster - Change Brand",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brandId\": 2\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters", "1"]
+            },
+            "description": "Transférer un quizmaster vers un autre brand"
+          },
+          "response": []
+        },
+        {
+          "name": "11. Update Quizmaster - Change Password",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"NewQuizPass456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters", "1"]
+            },
+            "description": "Changer le mot de passe d'un quizmaster"
+          },
+          "response": []
+        },
+        {
+          "name": "12. Delete Quizmaster",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters", "1"]
+            },
+            "description": "Supprimer un quizmaster"
+          },
+          "response": []
+        },
+        {
+          "name": "13. No Token (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/quizmasters",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "quizmasters"]
+            },
+            "description": "Accéder sans token JWT → 401"
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "variable": [
