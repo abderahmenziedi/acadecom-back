@@ -19,16 +19,132 @@ enum Role {
 
 // Modèle utilisateur principal
 model User {
-  id            Int      @id @default(autoincrement())                    // Identifiant unique auto-incrémenté
-  name          String?                                                   // Nom affiché (optionnel)
-  email         String   @unique                                          // Email unique (utilisé pour la connexion)
-  password      String                                                    // Mot de passe hashé (bcrypt)
-  role          Role     @default(participant)                            // Rôle par défaut : participant
-  isBlocked     Boolean  @default(false)                                  // Compte bloqué par l'admin
-  brandId       Int?                                                      // ID de l'utilisateur brand (si rôle = quizmaster)
-  brand         User?    @relation("quizmasterToBrand", fields: [brandId], references: [id]) // Relation vers le brand
-  quizmasters   User[]   @relation("quizmasterToBrand")                   // Quizmasters associés à ce brand
-  createdAt     DateTime @default(now())                                  // Date de création automatique
+  id            Int      @id @default(autoincrement())
+  name          String?
+  email         String   @unique
+  password      String
+  role          Role     @default(participant)
+  isBlocked     Boolean  @default(false)
+  brandId       Int?
+  industry      String?  @db.VarChar(100)      // Secteur d'activité (pour les brands)
+  description   String?  @db.Text              // Description (pour les brands)
+  brand         User?    @relation("quizmasterToBrand", fields: [brandId], references: [id])
+  quizmasters   User[]   @relation("quizmasterToBrand")
+  totalPoints   Int      @default(0)           // Gamification wallet
+  createdAt     DateTime @default(now())
 
-  @@map("users") // Nom de la table en base de données
+  // Relations Quiz Module
+  quizzes       Quiz[]     @relation("quizmasterQuizzes")
+  attempts      Attempt[]  @relation("participantAttempts")
+  answers       Answer[]   @relation("participantAnswers")
+  pointsHistory PointsHistory[] @relation("userPointsHistory")
+
+  @@map("users")
+}
+
+// ─── Quiz Module Models ────────────────────────────────────────────────────────
+
+model Quiz {
+  id            Int        @id @default(autoincrement())
+  title         String     @db.VarChar(255)
+  description   String?    @db.Text
+  brandId       Int
+  quizmasterId  Int
+  timeLimit     Int?                          // Durée en secondes (null = illimité)
+  pointsPerQuestion Int    @default(1)        // Points par question par défaut
+  shuffleQuestions  Boolean @default(false)   // Mélanger les questions
+  isActive      Boolean    @default(false)    // Quiz activé/désactivé
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  quizmaster    User       @relation("quizmasterQuizzes", fields: [quizmasterId], references: [id])
+  questions     Question[]
+  attempts      Attempt[]
+
+  @@index([quizmasterId])
+  @@index([brandId])
+  @@map("quizzes")
+}
+
+model Question {
+  id        Int      @id @default(autoincrement())
+  quizId    Int
+  text      String   @db.Text
+  points    Int      @default(1)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  options   Option[]
+  answers   Answer[]
+
+  @@index([quizId])
+  @@map("questions")
+}
+
+model Option {
+  id         Int      @id @default(autoincrement())
+  questionId Int
+  text       String   @db.VarChar(500)
+  isCorrect  Boolean  @default(false)
+
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  answers    Answer[]
+
+  @@index([questionId])
+  @@map("options")
+}
+
+model Attempt {
+  id          Int       @id @default(autoincrement())
+  quizId      Int
+  userId      Int
+  score       Int       @default(0)
+  maxScore    Int       @default(0)
+  completedAt DateTime?                       // null = en cours, non-null = terminé
+  duration    Int?                            // Durée en secondes
+  createdAt   DateTime  @default(now())
+
+  quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user      User     @relation("participantAttempts", fields: [userId], references: [id])
+  answers   Answer[]
+
+  @@index([quizId])
+  @@index([userId])
+  @@map("attempts")
+}
+
+model Answer {
+  id         Int      @id @default(autoincrement())
+  attemptId  Int
+  questionId Int
+  optionId   Int
+  isCorrect  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  attempt    Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  option     Option   @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user       User?    @relation("participantAnswers", fields: [userId], references: [id])
+  userId     Int?
+
+  @@index([attemptId])
+  @@index([questionId])
+  @@map("answers")
+}
+
+// ─── Gamification Module ────────────────────────────────────────────────────────
+
+model PointsHistory {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  points    Int                              // Positif = gagné, négatif = dépensé
+  reason    String   @db.VarChar(255)
+  attemptId Int?                             // Lien vers la tentative si gagné via quiz
+  createdAt DateTime @default(now())
+
+  user      User     @relation("userPointsHistory", fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("points_history")
 }

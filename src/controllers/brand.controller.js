@@ -15,12 +15,16 @@ function parseBrandId(params) {
 }
 
 /**
- * BrandController — Couche contrôleur pour la gestion des brands par l'admin.
+ * BrandController — Couche contrôleur pour la gestion des brands.
+ * Admin CRUD + Brand self-service.
  */
 const BrandController = {
+    // ═══════════════════════════════════════════════════════
+    // ADMIN CRUD
+    // ═══════════════════════════════════════════════════════
+
     /**
      * POST /api/v1/admin/brands
-     * Crée un nouveau brand.
      */
     async create(req, res, next) {
         try {
@@ -37,7 +41,6 @@ const BrandController = {
 
     /**
      * GET /api/v1/admin/brands
-     * Liste tous les brands avec pagination.
      */
     async getAll(req, res, next) {
         try {
@@ -50,8 +53,7 @@ const BrandController = {
                 return next(new ApiError(400, messages || "Paramètres invalides"));
             }
 
-            const { page, limit } = result.data;
-            const data = await BrandService.getAll({ page, limit });
+            const data = await BrandService.getAll(result.data);
 
             res.status(200).json({
                 status: "success",
@@ -65,7 +67,6 @@ const BrandController = {
 
     /**
      * GET /api/v1/admin/brands/:id
-     * Récupère un brand par son ID (avec ses quizmasters).
      */
     async getById(req, res, next) {
         try {
@@ -83,7 +84,6 @@ const BrandController = {
 
     /**
      * PUT /api/v1/admin/brands/:id
-     * Met à jour un brand existant.
      */
     async update(req, res, next) {
         try {
@@ -102,7 +102,6 @@ const BrandController = {
 
     /**
      * DELETE /api/v1/admin/brands/:id
-     * Supprime un brand (échoue si des quizmasters sont liés).
      */
     async delete(req, res, next) {
         try {
@@ -113,6 +112,60 @@ const BrandController = {
                 status: "success",
                 message: `Brand ${deleted.email} supprimé avec succès`,
                 data: { id: deleted.id },
+            });
+        } catch (err) {
+            next(err);
+        }
+    },
+
+    // ═══════════════════════════════════════════════════════
+    // BRAND SELF-SERVICE
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * GET /api/v1/brand/me
+     */
+    async getProfile(req, res, next) {
+        try {
+            const brand = await BrandService.getProfile(req.user.id);
+
+            res.status(200).json({
+                status: "success",
+                data: { brand },
+            });
+        } catch (err) {
+            next(err);
+        }
+    },
+
+    /**
+     * PUT /api/v1/brand/me
+     */
+    async updateProfile(req, res, next) {
+        try {
+            const brand = await BrandService.updateProfile(req.user.id, req.body);
+
+            res.status(200).json({
+                status: "success",
+                message: "Profil mis à jour avec succès",
+                data: { brand },
+            });
+        } catch (err) {
+            next(err);
+        }
+    },
+
+    /**
+     * GET /api/v1/brand/quizmasters
+     */
+    async getQuizmasters(req, res, next) {
+        try {
+            const quizmasters = await BrandService.getQuizmasters(req.user.id);
+
+            res.status(200).json({
+                status: "success",
+                message: `${quizmasters.length} quizmaster(s) trouvé(s)`,
+                data: { quizmasters },
             });
         } catch (err) {
             next(err);

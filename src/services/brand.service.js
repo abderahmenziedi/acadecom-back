@@ -10,20 +10,26 @@ const brandSelect = {
     name: true,
     email: true,
     role: true,
+    industry: true,
+    description: true,
     isBlocked: true,
     createdAt: true,
     _count: { select: { quizmasters: true } },
 };
 
 /**
- * BrandService — Logique métier pour la gestion des brands par l'admin.
+ * BrandService — Logique métier pour la gestion des brands.
+ * Admin CRUD + Brand self-service.
  */
 const BrandService = {
+    // ═══════════════════════════════════════════════════════
+    // ADMIN CRUD
+    // ═══════════════════════════════════════════════════════
+
     /**
      * Crée un nouvel utilisateur avec le rôle "brand".
-     * @param {{ name: string, email: string, password: string }} data
      */
-    async create({ name, email, password }) {
+    async create({ name, email, password, industry, description }) {
         const existing = await prisma.user.findUnique({ where: { email } });
         if (existing) {
             throw new ApiError(409, "Cet email est déjà utilisé");
@@ -32,7 +38,14 @@ const BrandService = {
         const hashed = await bcrypt.hash(password, 10);
 
         const brand = await prisma.user.create({
-            data: { name, email, password: hashed, role: "brand" },
+            data: {
+                name,
+                email,
+                password: hashed,
+                role: "brand",
+                industry: industry || null,
+                description: description || null,
+            },
             select: brandSelect,
         });
 
@@ -40,11 +53,21 @@ const BrandService = {
     },
 
     /**
-     * Récupère la liste paginée de tous les brands.
-     * @param {{ page: number, limit: number }} options
+     * Récupère la liste paginée de tous les brands avec filtres.
      */
-    async getAll({ page = 1, limit = 10 }) {
+    async getAll({ page = 1, limit = 10, industry, search }) {
         const where = { role: "brand" };
+
+        if (industry) {
+            where.industry = { contains: industry };
+        }
+        if (search) {
+            where.OR = [
+                { name: { contains: search } },
+                { email: { contains: search } },
+            ];
+        }
+
         const skip = (page - 1) * limit;
 
         const [brands, total] = await prisma.$transaction([
@@ -67,8 +90,7 @@ const BrandService = {
     },
 
     /**
-     * Récupère un brand par son ID.
-     * @param {number} id
+     * Récupère un brand par son ID (avec ses quizmasters).
      */
     async getById(id) {
         const brand = await prisma.user.findUnique({
@@ -89,9 +111,7 @@ const BrandService = {
     },
 
     /**
-     * Met à jour un brand existant.
-     * @param {number} id
-     * @param {{ name?: string, email?: string, password?: string }} data
+     * Met à jour un brand existant (admin — tous les champs).
      */
     async update(id, data) {
         const brand = await prisma.user.findUnique({
@@ -103,7 +123,6 @@ const BrandService = {
             throw new ApiError(404, `Brand avec ID ${id} introuvable`);
         }
 
-        // Vérifier l'unicité de l'email si modifié
         if (data.email) {
             const existing = await prisma.user.findUnique({ where: { email: data.email } });
             if (existing && existing.id !== id) {
@@ -111,7 +130,6 @@ const BrandService = {
             }
         }
 
-        // Hasher le nouveau mot de passe si fourni
         if (data.password) {
             data.password = await bcrypt.hash(data.password, 10);
         }
@@ -127,7 +145,6 @@ const BrandService = {
 
     /**
      * Supprime un brand. Échoue si des quizmasters sont encore liés.
-     * @param {number} id
      */
     async delete(id) {
         const brand = await prisma.user.findUnique({
@@ -154,6 +171,87 @@ const BrandService = {
         await prisma.user.delete({ where: { id } });
 
         return { id, email: brand.email };
+    },
+
+    // ═══════════════════════════════════════════════════════
+    // BRAND SELF-SERVICE
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Récupère le profil du brand connecté (dashboard info).
+     */
+    async getProfile(brandId) {
+        const brand = await prisma.user.findUnique({
+            where: { id: brandId },
+            select: {
+                ...brandSelect,
+                quizmasters: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                        createdAt: true,
+                        _count: { select: { quizzes: true } },
+                    },
+                },
+            },
+        });
+
+        if (!brand || brand.role !== "brand") {
+            throw new ApiError(404, "Profil brand introuvable");
+        }
+
+        return brand;
+    },
+
+    /**
+     * Met à jour le profil du brand (champs limités : name, industry, description).
+     */
+    async updateProfile(brandId, data) {
+        const brand = await prisma.user.findUnique({
+            where: { id: brandId },
+            select: { id: true, role: true },
+        });
+
+        if (!brand || brand.role !== "brand") {
+            throw new ApiError(404, "Profil brand introuvable");
+        }
+
+        const updated = await prisma.user.update({
+            where: { id: brandId },
+            data,
+            select: brandSelect,
+        });
+
+        return updated;
+    },
+
+    /**
+     * Récupère les quizmasters liés à ce brand.
+     */
+    async getQuizmasters(brandId) {
+        const brand = await prisma.user.findUnique({
+            where: { id: brandId },
+            select: { id: true, role: true },
+        });
+
+        if (!brand || brand.role !== "brand") {
+            throw new ApiError(404, "Brand introuvable");
+        }
+
+        const quizmasters = await prisma.user.findMany({
+            where: { brandId, role: "quizmaster" },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                createdAt: true,
+                _count: { select: { quizzes: true } },
+            },
+            orderBy: { createdAt: "desc" },
+        });
+
+        return quizmasters;
     },
 };
 

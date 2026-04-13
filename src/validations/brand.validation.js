@@ -1,7 +1,7 @@
 const { z } = require("zod");
 
 /**
- * Schémas de validation Zod pour les routes admin/brands.
+ * Schémas de validation Zod pour les routes admin/brands et brand self-service.
  */
 
 const positiveIntSchema = z
@@ -16,7 +16,7 @@ const brandIdParamSchema = z.object({
     id: positiveIntSchema,
 });
 
-// Validation pour la création d'un brand
+// Validation pour la création d'un brand (admin)
 const createBrandSchema = z.object({
     name: z
         .string({ required_error: "Le nom est requis" })
@@ -33,9 +33,21 @@ const createBrandSchema = z.object({
         .string({ required_error: "Le mot de passe est requis" })
         .min(6, "Le mot de passe doit contenir au moins 6 caractères")
         .max(128, "Le mot de passe ne peut pas dépasser 128 caractères"),
+    industry: z
+        .string()
+        .max(100, "Le secteur ne peut pas dépasser 100 caractères")
+        .trim()
+        .optional()
+        .nullable(),
+    description: z
+        .string()
+        .max(2000, "La description ne peut pas dépasser 2000 caractères")
+        .trim()
+        .optional()
+        .nullable(),
 });
 
-// Validation pour la mise à jour d'un brand (tous les champs optionnels)
+// Validation pour la mise à jour d'un brand (admin — tous les champs)
 const updateBrandSchema = z.object({
     name: z
         .string()
@@ -55,6 +67,43 @@ const updateBrandSchema = z.object({
         .min(6, "Le mot de passe doit contenir au moins 6 caractères")
         .max(128, "Le mot de passe ne peut pas dépasser 128 caractères")
         .optional(),
+    industry: z
+        .string()
+        .max(100, "Le secteur ne peut pas dépasser 100 caractères")
+        .trim()
+        .optional()
+        .nullable(),
+    description: z
+        .string()
+        .max(2000, "La description ne peut pas dépasser 2000 caractères")
+        .trim()
+        .optional()
+        .nullable(),
+}).refine(
+    (data) => Object.keys(data).length > 0,
+    { message: "Au moins un champ doit être fourni pour la mise à jour" }
+);
+
+// Validation pour la mise à jour du profil brand (self — champs limités, pas d'email/password)
+const updateBrandProfileSchema = z.object({
+    name: z
+        .string()
+        .min(2, "Le nom doit contenir au moins 2 caractères")
+        .max(100, "Le nom ne peut pas dépasser 100 caractères")
+        .trim()
+        .optional(),
+    industry: z
+        .string()
+        .max(100, "Le secteur ne peut pas dépasser 100 caractères")
+        .trim()
+        .optional()
+        .nullable(),
+    description: z
+        .string()
+        .max(2000, "La description ne peut pas dépasser 2000 caractères")
+        .trim()
+        .optional()
+        .nullable(),
 }).refine(
     (data) => Object.keys(data).length > 0,
     { message: "Au moins un champ doit être fourni pour la mise à jour" }
@@ -64,11 +113,14 @@ const updateBrandSchema = z.object({
 const getBrandsQuerySchema = z.object({
     page: z.coerce.number().int("page doit être un entier").min(1, "page doit être >= 1").default(1),
     limit: z.coerce.number().int("limit doit être un entier").min(1, "limit doit être >= 1").max(100, "limit doit être <= 100").default(10),
+    industry: z.string().max(100).optional(),
+    search: z.string().max(100).optional(),
 });
 
 module.exports = {
     brandIdParamSchema,
     createBrandSchema,
     updateBrandSchema,
+    updateBrandProfileSchema,
     getBrandsQuerySchema,
 };

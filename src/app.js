@@ -23,6 +23,12 @@ const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin.routes");
 const brandRoutes = require("./routes/brand.routes");
 const quizmasterRoutes = require("./routes/quizmaster.routes");
+const brandSelfRoutes = require("./routes/brandSelf.routes");
+const quizRoutes = require("./routes/quiz.routes");
+const questionRoutes = require("./routes/question.routes");
+const analyticsRoutes = require("./routes/analytics.routes");
+const participantRoutes = require("./routes/participant.routes");
+const leaderboardRoutes = require("./routes/leaderboard.routes");
 
 // Middlewares
 const auth = require("./middlewares/auth");
@@ -87,6 +93,20 @@ app.use("/api/admin", adminRoutes);
 // Routes admin — Gestion des brands et quizmasters
 app.use("/api/v1/admin/brands", brandRoutes);
 app.use("/api/v1/admin/quizmasters", quizmasterRoutes);
+
+// Routes brand — Self-service + analytics
+app.use("/api/v1/brand", brandSelfRoutes);
+
+// Routes quizmaster — Quiz module
+app.use("/api/v1/quizmaster/quizzes", quizRoutes);
+app.use("/api/v1/quizmaster/questions", questionRoutes);
+app.use("/api/v1/quizmaster/dashboard", analyticsRoutes);
+
+// Routes participant — Module complet (profil, quiz, historique, wallet, recommandations)
+app.use("/api/v1/participant", participantRoutes);
+
+// Routes leaderboard — Classements
+app.use("/api/v1/leaderboard", leaderboardRoutes);
 
 // ─── 5. Routes protégées (exemples) ──────────────────────────────────────────
 
