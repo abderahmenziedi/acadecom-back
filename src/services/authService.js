@@ -16,7 +16,7 @@ const AuthService = {
      * @returns {{ id, email, role, brandId, brand, createdAt }}
      */
     async register(data) {
-        const { email, password, role = "participant", brandId } = data;
+        const { name, email, password, role = "participant", brandId } = data;
 
         // Vérifier si l'email est déjà utilisé
         const existing = await prisma.user.findUnique({ where: { email } });
@@ -47,6 +47,7 @@ const AuthService = {
 
         const user = await prisma.user.create({
             data: {
+                name,
                 email,
                 password: hashed,
                 role,
@@ -109,6 +110,7 @@ const AuthService = {
             token,
             user: {
                 id: user.id,
+                name: user.name,
                 email: user.email,
                 role: user.role,
                 ...(user.role === "quizmaster" && { brandId: user.brandId, brand }),

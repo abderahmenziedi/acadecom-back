@@ -174,11 +174,57 @@ const AdminService = {
             throw new ApiError(403, "Impossible de supprimer un autre administrateur");
         }
 
-        // Si l'utilisateur est une brand, supprimer aussi les quizmasters associés
+        // Suppression en cascade via transaction pour garantir l'intégrité
         if (user.role === "brand") {
-            await prisma.user.deleteMany({
-                where: { brandId: targetId },
-            });
+            // Récupérer les quizmasters de cette brand
+            const qmIds = (await prisma.user.findMany({
+                where: { brandId: targetId, role: "quizmaster" },
+                select: { id: true },
+            })).map(q => q.id);
+
+            if (qmIds.length > 0) {
+                // Supprimer les quizzes de ces quizmasters (cascade: questions, options, attempts, answers)
+                const quizIds = (await prisma.quiz.findMany({
+                    where: { quizmasterId: { in: qmIds } },
+                    select: { id: true },
+                })).map(q => q.id);
+
+                if (quizIds.length > 0) {
+                    await prisma.answer.deleteMany({ where: { attempt: { quizId: { in: quizIds } } } });
+                    await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id) } } });
+                    await prisma.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
+                    await prisma.option.deleteMany({ where: { question: { quizId: { in: quizIds } } } });
+                    await prisma.question.deleteMany({ where: { quizId: { in: quizIds } } });
+                    await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
+                }
+
+                // Supprimer les quizmasters
+                await prisma.user.deleteMany({ where: { id: { in: qmIds } } });
+            }
+        }
+
+        if (user.role === "quizmaster") {
+            // Supprimer les quizzes de ce quizmaster (cascade)
+            const quizIds = (await prisma.quiz.findMany({
+                where: { quizmasterId: targetId },
+                select: { id: true },
+            })).map(q => q.id);
+
+            if (quizIds.length > 0) {
+                await prisma.answer.deleteMany({ where: { attempt: { quizId: { in: quizIds } } } });
+                await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id) } } });
+                await prisma.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
+                await prisma.option.deleteMany({ where: { question: { quizId: { in: quizIds } } } });
+                await prisma.question.deleteMany({ where: { quizId: { in: quizIds } } });
+                await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
+            }
+        }
+
+        if (user.role === "participant") {
+            // Supprimer les réponses, tentatives et historique du participant
+            await prisma.answer.deleteMany({ where: { userId: targetId } });
+            await prisma.pointsHistory.deleteMany({ where: { userId: targetId } });
+            await prisma.attempt.deleteMany({ where: { userId: targetId } });
         }
 
         // Supprimer l'utilisateur

@@ -167,6 +167,24 @@ const QuizmasterService = {
             throw new ApiError(404, `Quizmaster avec ID ${id} introuvable`);
         }
 
+        // Supprimer les quizzes du quizmaster (cascade: questions, options, attempts, answers)
+        const quizIds = (await prisma.quiz.findMany({
+            where: { quizmasterId: id },
+            select: { id: true },
+        })).map(q => q.id);
+
+        if (quizIds.length > 0) {
+            await prisma.answer.deleteMany({ where: { attempt: { quizId: { in: quizIds } } } });
+            const attemptIds = (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id);
+            if (attemptIds.length > 0) {
+                await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: attemptIds } } });
+            }
+            await prisma.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
+            await prisma.option.deleteMany({ where: { question: { quizId: { in: quizIds } } } });
+            await prisma.question.deleteMany({ where: { quizId: { in: quizIds } } });
+            await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
+        }
+
         await prisma.user.delete({ where: { id } });
 
         return { id, email: quizmaster.email };

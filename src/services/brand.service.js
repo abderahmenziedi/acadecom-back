@@ -253,6 +253,41 @@ const BrandService = {
 
         return quizmasters;
     },
+
+    /**
+     * Récupère les quizzes liés à ce brand (via ses quizmasters).
+     */
+    async getQuizzes(brandId) {
+        const brand = await prisma.user.findUnique({
+            where: { id: brandId },
+            select: { id: true, role: true },
+        });
+
+        if (!brand || brand.role !== "brand") {
+            throw new ApiError(404, "Brand introuvable");
+        }
+
+        const quizzes = await prisma.quiz.findMany({
+            where: { brandId },
+            select: {
+                id: true,
+                title: true,
+                description: true,
+                isActive: true,
+                timeLimit: true,
+                pointsPerQuestion: true,
+                createdAt: true,
+                updatedAt: true,
+                quizmaster: {
+                    select: { id: true, name: true, email: true },
+                },
+                _count: { select: { questions: true, attempts: true } },
+            },
+            orderBy: { createdAt: "desc" },
+        });
+
+        return quizzes;
+    },
 };
 
 module.exports = BrandService;

@@ -120,6 +120,9 @@ const ParticipantService = {
                     timeLimit: true,
                     pointsPerQuestion: true,
                     createdAt: true,
+                    quizmaster: {
+                        select: { id: true, name: true, email: true },
+                    },
                     _count: { select: { questions: true, attempts: true } },
                 },
             }),

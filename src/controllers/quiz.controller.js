@@ -1,18 +1,26 @@
 const QuizService = require("../services/quiz.service");
 const { quizIdParamSchema, getQuizzesQuerySchema, submitAnswersSchema } = require("../validations/quiz.validation");
 const ApiError = require("../utils/ApiError");
+const prisma = require("../config/prisma");
 
 /**
- * Extrait quizmasterId et brandId du JWT.
+ * Extrait quizmasterId du JWT et récupère brandId depuis la DB (évite les données stale du token).
  */
-function extractQuizmasterInfo(req) {
+async function extractQuizmasterInfo(req) {
     if (!req.user?.id) {
         throw new ApiError(401, "Quizmaster ID manquant dans le token JWT");
     }
-    if (!req.user?.brandId) {
+    const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { brandId: true, role: true },
+    });
+    if (!user || user.role !== "quizmaster") {
+        throw new ApiError(403, "Accès réservé aux quizmasters");
+    }
+    if (!user.brandId) {
         throw new ApiError(403, "Ce quizmaster n'est pas lié à une brand");
     }
-    return { quizmasterId: req.user.id, brandId: req.user.brandId };
+    return { quizmasterId: req.user.id, brandId: user.brandId };
 }
 
 function parseQuizId(params) {

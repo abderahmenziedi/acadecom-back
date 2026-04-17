@@ -171,6 +171,23 @@ const BrandController = {
             next(err);
         }
     },
+
+    /**
+     * GET /api/v1/brand/quizzes
+     */
+    async getQuizzes(req, res, next) {
+        try {
+            const quizzes = await BrandService.getQuizzes(req.user.id);
+
+            res.status(200).json({
+                status: "success",
+                message: `${quizzes.length} quiz(zes) trouvé(s)`,
+                data: { quizzes },
+            });
+        } catch (err) {
+            next(err);
+        }
+    },
 };
 
 module.exports = BrandController;

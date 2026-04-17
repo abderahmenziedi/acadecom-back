@@ -7,9 +7,14 @@ const { z } = require("zod");
  * - quizmaster: Maître de quiz (doit sélectionner un utilisateur avec rôle "brand")
  * - admin: Administrateur système
  */
-const allowedRolesAtRegister = ["participant", "brand", "quizmaster", "admin"];
+const allowedRolesAtRegister = ["participant", "brand", "quizmaster"];
 
 const registerSchema = z.object({
+    name: z
+        .string({ required_error: "Le nom est requis" })
+        .min(2, "Le nom doit contenir au moins 2 caractères")
+        .max(100, "Le nom ne peut pas dépasser 100 caractères")
+        .trim(),
     email: z.string({ required_error: "L'email est requis" }).email("Format email invalide"),
     password: z
         .string({ required_error: "Le mot de passe est requis" })

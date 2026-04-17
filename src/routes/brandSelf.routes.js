@@ -25,6 +25,7 @@ router.use(auth, permit("brand", "admin"));
 router.get("/me", permit("brand"), BrandController.getProfile);
 router.put("/me", permit("brand"), validate(updateBrandProfileSchema), BrandController.updateProfile);
 router.get("/quizmasters", permit("brand"), BrandController.getQuizmasters);
+router.get("/quizzes", permit("brand"), BrandController.getQuizzes);
 router.get("/dashboard", permit("brand"), BrandAnalyticsController.getDashboard);
 
 // ─── ROUTES PARAMÉTRÉES (analytics par ID — admin ou brand propre) ────────────
