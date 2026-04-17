@@ -29,6 +29,9 @@ const questionRoutes = require("./routes/question.routes");
 const analyticsRoutes = require("./routes/analytics.routes");
 const participantRoutes = require("./routes/participant.routes");
 const leaderboardRoutes = require("./routes/leaderboard.routes");
+const storeRoutes = require("./routes/store.routes");
+const gamificationRoutes = require("./routes/gamification.routes");
+const notificationRoutes = require("./routes/notification.routes");
 
 // Middlewares
 const auth = require("./middlewares/auth");
@@ -107,6 +110,15 @@ app.use("/api/v1/participant", participantRoutes);
 
 // Routes leaderboard — Classements
 app.use("/api/v1/leaderboard", leaderboardRoutes);
+
+// Routes store — Marketplace / Boutique
+app.use("/api/v1/store", storeRoutes);
+
+// Routes gamification — XP, niveaux, badges
+app.use("/api/v1/gamification", gamificationRoutes);
+
+// Routes notifications
+app.use("/api/v1/notifications", notificationRoutes);
 
 // ─── 5. Routes protégées (exemples) ──────────────────────────────────────────
 

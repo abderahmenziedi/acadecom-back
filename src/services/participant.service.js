@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const ApiError = require("../utils/ApiError");
+const GamificationService = require("./gamification.service");
 
 /**
  * ParticipantService — Logique métier complète du module Participant.
@@ -19,11 +20,17 @@ const ParticipantService = {
                 email: true,
                 role: true,
                 totalPoints: true,
+                xp: true,
+                level: true,
+                coupons: true,
                 createdAt: true,
+                _count: { select: { badges: true } },
             },
         });
         if (!user) throw new ApiError(404, "Participant introuvable");
-        return user;
+
+        const levelName = GamificationService.getLevelName(user.level);
+        return { ...user, levelName, badgeCount: user._count.badges };
     },
 
     async updateProfile(userId, data) {
@@ -259,6 +266,9 @@ const ParticipantService = {
                 quiz: {
                     select: {
                         title: true,
+                        xpReward: true,
+                        couponReward: true,
+                        passingScore: true,
                         questions: { select: { id: true, points: true } },
                     },
                 },
@@ -269,7 +279,6 @@ const ParticipantService = {
         if (attempt.userId !== userId) throw new ApiError(403, "Cette tentative ne vous appartient pas");
         if (attempt.completedAt) throw new ApiError(409, "Cette tentative est déjà terminée");
 
-        // Calculer le score à partir des réponses correctes
         const questionPointsMap = new Map(
             attempt.quiz.questions.map(q => [q.id, q.points])
         );
@@ -287,34 +296,25 @@ const ParticipantService = {
         const duration = Math.round((now.getTime() - attempt.createdAt.getTime()) / 1000);
         const percentage = attempt.maxScore > 0 ? Math.round((score / attempt.maxScore) * 100) : 0;
 
-        // Transaction : mettre à jour l'attempt + accorder les points + historique
-        const [updatedAttempt] = await prisma.$transaction([
-            prisma.attempt.update({
-                where: { id: attemptId },
-                data: { score, completedAt: now, duration },
-                select: {
-                    id: true,
-                    quizId: true,
-                    score: true,
-                    maxScore: true,
-                    duration: true,
-                    completedAt: true,
-                    createdAt: true,
-                },
-            }),
-            prisma.user.update({
-                where: { id: userId },
-                data: { totalPoints: { increment: score } },
-            }),
-            prisma.pointsHistory.create({
-                data: {
-                    userId,
-                    points: score,
-                    reason: `Quiz terminé : ${attempt.quiz.title}`,
-                    attemptId,
-                },
-            }),
-        ]);
+        const updatedAttempt = await prisma.attempt.update({
+            where: { id: attemptId },
+            data: { score, completedAt: now, duration },
+            select: {
+                id: true, quizId: true, score: true, maxScore: true,
+                duration: true, completedAt: true, createdAt: true,
+            },
+        });
+
+        // Process gamification (XP, levels, badges, coupons)
+        const gamification = await GamificationService.processQuizCompletion(userId, attemptId, {
+            score,
+            maxScore: attempt.maxScore,
+            duration,
+            quizTitle: attempt.quiz.title,
+            xpReward: attempt.quiz.xpReward || 10,
+            couponReward: attempt.quiz.couponReward || 0,
+            passingScore: attempt.quiz.passingScore || 50,
+        });
 
         return {
             ...updatedAttempt,
@@ -323,6 +323,7 @@ const ParticipantService = {
             correctAnswers,
             percentage,
             pointsEarned: score,
+            ...gamification,
         };
     },
 
@@ -343,6 +344,9 @@ const ParticipantService = {
                 quiz: {
                     select: {
                         title: true,
+                        xpReward: true,
+                        couponReward: true,
+                        passingScore: true,
                         questions: {
                             select: {
                                 id: true,
@@ -359,13 +363,11 @@ const ParticipantService = {
         if (attempt.userId !== userId) throw new ApiError(403, "Cette tentative ne vous appartient pas");
         if (attempt.completedAt) throw new ApiError(409, "Cette tentative est déjà terminée");
 
-        // Vérifier qu'aucune réponse n'existe déjà
         const existingCount = await prisma.answer.count({ where: { attemptId } });
         if (existingCount > 0) {
             throw new ApiError(409, "Les réponses ont déjà été soumises pour cette tentative");
         }
 
-        // Construire une map question -> { points, correctOptionIds, validOptionIds }
         const questionMap = new Map();
         for (const q of attempt.quiz.questions) {
             questionMap.set(q.id, {
@@ -391,44 +393,37 @@ const ParticipantService = {
 
         const now = new Date();
         const duration = Math.round((now.getTime() - attempt.createdAt.getTime()) / 1000);
-        const percentage = attempt.maxScore > 0 ? Math.round((score / attempt.maxScore) * 100) : 0;
         const correctAnswers = answerRecords.filter(a => a.isCorrect).length;
 
-        const [, updatedAttempt] = await prisma.$transaction([
-            prisma.answer.createMany({ data: answerRecords }),
-            prisma.attempt.update({
-                where: { id: attemptId },
-                data: { score, completedAt: now, duration },
-                select: {
-                    id: true,
-                    quizId: true,
-                    score: true,
-                    maxScore: true,
-                    duration: true,
-                    completedAt: true,
-                    createdAt: true,
-                },
-            }),
-            prisma.user.update({
-                where: { id: userId },
-                data: { totalPoints: { increment: score } },
-            }),
-            prisma.pointsHistory.create({
-                data: {
-                    userId,
-                    points: score,
-                    reason: `Quiz terminé : ${attempt.quiz.title}`,
-                    attemptId,
-                },
-            }),
-        ]);
+        // Save answers + update attempt
+        await prisma.answer.createMany({ data: answerRecords });
+        const updatedAttempt = await prisma.attempt.update({
+            where: { id: attemptId },
+            data: { score, completedAt: now, duration },
+            select: {
+                id: true, quizId: true, score: true, maxScore: true,
+                duration: true, completedAt: true, createdAt: true,
+            },
+        });
+
+        // Process gamification
+        const gamification = await GamificationService.processQuizCompletion(userId, attemptId, {
+            score,
+            maxScore: attempt.maxScore,
+            duration,
+            quizTitle: attempt.quiz.title,
+            xpReward: attempt.quiz.xpReward || 10,
+            couponReward: attempt.quiz.couponReward || 0,
+            passingScore: attempt.quiz.passingScore || 50,
+        });
 
         return {
             ...updatedAttempt,
             totalQuestions: attempt.quiz.questions.length,
             correctAnswers,
-            percentage,
+            percentage: attempt.maxScore > 0 ? Math.round((score / attempt.maxScore) * 100) : 0,
             pointsEarned: score,
+            ...gamification,
         };
     },
 

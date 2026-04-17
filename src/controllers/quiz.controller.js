@@ -41,7 +41,7 @@ const QuizController = {
      */
     async create(req, res, next) {
         try {
-            const { quizmasterId, brandId } = extractQuizmasterInfo(req);
+            const { quizmasterId, brandId } = await extractQuizmasterInfo(req);
             const quiz = await QuizService.create(req.body, quizmasterId, brandId);
             res.status(201).json({
                 status: "success",
@@ -58,7 +58,7 @@ const QuizController = {
      */
     async getAll(req, res, next) {
         try {
-            const { quizmasterId } = extractQuizmasterInfo(req);
+            const { quizmasterId } = await extractQuizmasterInfo(req);
 
             const result = getQuizzesQuerySchema.safeParse(req.query);
             if (!result.success) {
@@ -86,7 +86,7 @@ const QuizController = {
      */
     async getById(req, res, next) {
         try {
-            const { quizmasterId } = extractQuizmasterInfo(req);
+            const { quizmasterId } = await extractQuizmasterInfo(req);
             const quizId = parseQuizId(req.params);
             const quiz = await QuizService.getById(quizId, quizmasterId);
 
@@ -104,7 +104,7 @@ const QuizController = {
      */
     async update(req, res, next) {
         try {
-            const { quizmasterId } = extractQuizmasterInfo(req);
+            const { quizmasterId } = await extractQuizmasterInfo(req);
             const quizId = parseQuizId(req.params);
             const quiz = await QuizService.update(quizId, req.body, quizmasterId);
 
@@ -123,7 +123,7 @@ const QuizController = {
      */
     async delete(req, res, next) {
         try {
-            const { quizmasterId } = extractQuizmasterInfo(req);
+            const { quizmasterId } = await extractQuizmasterInfo(req);
             const quizId = parseQuizId(req.params);
             const deleted = await QuizService.delete(quizId, quizmasterId);
 

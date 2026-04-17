@@ -22,6 +22,8 @@ const LeaderboardService = {
                     id: true,
                     name: true,
                     totalPoints: true,
+                    xp: true,
+                    level: true,
                     _count: { select: { attempts: true } },
                 },
             }),
@@ -33,10 +35,88 @@ const LeaderboardService = {
             id: p.id,
             name: p.name,
             totalPoints: p.totalPoints,
+            xp: p.xp,
+            level: p.level,
             gamesPlayed: p._count.attempts,
         }));
 
         return { leaderboard, total, page, totalPages: Math.ceil(total / limit) };
+    },
+
+    /**
+     * Classement hebdomadaire — points gagnés cette semaine.
+     */
+    async getWeekly({ page = 1, limit = 20 }) {
+        const now = new Date();
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay());
+        startOfWeek.setHours(0, 0, 0, 0);
+
+        const weeklyScores = await prisma.pointsHistory.groupBy({
+            by: ["userId"],
+            where: { points: { gt: 0 }, createdAt: { gte: startOfWeek } },
+            _sum: { points: true },
+            orderBy: { _sum: { points: "desc" } },
+            take: limit,
+            skip: (page - 1) * limit,
+        });
+
+        const userIds = weeklyScores.map((s) => s.userId);
+        const users = await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, name: true, level: true },
+        });
+        const userMap = new Map(users.map((u) => [u.id, u]));
+
+        const leaderboard = weeklyScores.map((s, i) => {
+            const u = userMap.get(s.userId);
+            return {
+                rank: (page - 1) * limit + i + 1,
+                id: s.userId,
+                name: u?.name || "Inconnu",
+                level: u?.level || 1,
+                weeklyPoints: s._sum.points || 0,
+            };
+        });
+
+        return { leaderboard, period: "weekly" };
+    },
+
+    /**
+     * Classement mensuel — points gagnés ce mois.
+     */
+    async getMonthly({ page = 1, limit = 20 }) {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        const monthlyScores = await prisma.pointsHistory.groupBy({
+            by: ["userId"],
+            where: { points: { gt: 0 }, createdAt: { gte: startOfMonth } },
+            _sum: { points: true },
+            orderBy: { _sum: { points: "desc" } },
+            take: limit,
+            skip: (page - 1) * limit,
+        });
+
+        const userIds = monthlyScores.map((s) => s.userId);
+        const users = await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, name: true, level: true },
+        });
+        const userMap = new Map(users.map((u) => [u.id, u]));
+
+        const leaderboard = monthlyScores.map((s, i) => {
+            const u = userMap.get(s.userId);
+            return {
+                rank: (page - 1) * limit + i + 1,
+                id: s.userId,
+                name: u?.name || "Inconnu",
+                level: u?.level || 1,
+                monthlyPoints: s._sum.points || 0,
+            };
+        });
+
+        return { leaderboard, period: "monthly" };
     },
 
     /**

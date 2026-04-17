@@ -1,61 +1,108 @@
-// Configuration du générateur du client Prisma
+// ═══════════════════════════════════════════════════════════════
+// AcadeCom — Prisma Schema v2.0 (Production-Ready)
+// ═══════════════════════════════════════════════════════════════
+
 generator client {
   provider = "prisma-client-js"
 }
 
-// Source de données : MySQL
 datasource db {
   provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
-// Enum des rôles disponibles dans l'application
+// ─── Enums ──────────────────────────────────────────────────────
+
 enum Role {
-  participant  // Utilisateur standard
-  brand        // Représentant d'une marque (peut avoir plusieurs quizmasters)
-  quizmaster   // Maître de quiz (doit être lié à un utilisateur avec rôle "brand")
-  admin        // Administrateur système
+  participant
+  brand
+  quizmaster
+  admin
 }
 
-// Modèle utilisateur principal
-model User {
-  id            Int      @id @default(autoincrement())
-  name          String?
-  email         String   @unique
-  password      String
-  role          Role     @default(participant)
-  isBlocked     Boolean  @default(false)
-  brandId       Int?
-  industry      String?  @db.VarChar(100)      // Secteur d'activité (pour les brands)
-  description   String?  @db.Text              // Description (pour les brands)
-  brand         User?    @relation("quizmasterToBrand", fields: [brandId], references: [id])
-  quizmasters   User[]   @relation("quizmasterToBrand")
-  totalPoints   Int      @default(0)           // Gamification wallet
-  createdAt     DateTime @default(now())
+enum Difficulty {
+  easy
+  medium
+  hard
+}
 
-  // Relations Quiz Module
-  quizzes       Quiz[]     @relation("quizmasterQuizzes")
-  attempts      Attempt[]  @relation("participantAttempts")
-  answers       Answer[]   @relation("participantAnswers")
-  pointsHistory PointsHistory[] @relation("userPointsHistory")
+enum OrderStatus {
+  pending
+  confirmed
+  delivered
+  cancelled
+}
+
+enum NotificationType {
+  badge_earned
+  level_up
+  quiz_completed
+  order_confirmed
+  reward_earned
+  system
+}
+
+// ─── User ───────────────────────────────────────────────────────
+
+model User {
+  id            Int       @id @default(autoincrement())
+  name          String?
+  email         String    @unique
+  password      String
+  role          Role      @default(participant)
+  isBlocked     Boolean   @default(false)
+  avatar        String?   @db.VarChar(500)
+
+  // Brand fields
+  brandId       Int?
+  industry      String?   @db.VarChar(100)
+  description   String?   @db.Text
+  brand         User?     @relation("quizmasterToBrand", fields: [brandId], references: [id])
+  quizmasters   User[]    @relation("quizmasterToBrand")
+
+  // Gamification
+  totalPoints   Int       @default(0)
+  xp            Int       @default(0)
+  level         Int       @default(1)
+  coupons       Int       @default(0)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+
+  // Relations
+  quizzes         Quiz[]          @relation("quizmasterQuizzes")
+  attempts        Attempt[]       @relation("participantAttempts")
+  answers         Answer[]        @relation("participantAnswers")
+  pointsHistory   PointsHistory[] @relation("userPointsHistory")
+  badges          UserBadge[]     @relation("userBadges")
+  notifications   Notification[]  @relation("userNotifications")
+  orders          Order[]         @relation("userOrders")
+  products        Product[]       @relation("brandProducts")
 
   @@map("users")
 }
 
-// ─── Quiz Module Models ────────────────────────────────────────────────────────
+// ─── Quiz Module ────────────────────────────────────────────────
 
 model Quiz {
-  id            Int        @id @default(autoincrement())
-  title         String     @db.VarChar(255)
-  description   String?    @db.Text
-  brandId       Int
-  quizmasterId  Int
-  timeLimit     Int?                          // Durée en secondes (null = illimité)
-  pointsPerQuestion Int    @default(1)        // Points par question par défaut
-  shuffleQuestions  Boolean @default(false)   // Mélanger les questions
-  isActive      Boolean    @default(false)    // Quiz activé/désactivé
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  id                Int        @id @default(autoincrement())
+  title             String     @db.VarChar(255)
+  description       String?    @db.Text
+  brandId           Int
+  quizmasterId      Int
+  timeLimit         Int?
+  pointsPerQuestion Int        @default(1)
+  shuffleQuestions  Boolean    @default(false)
+  isActive          Boolean    @default(false)
+  difficulty        Difficulty @default(medium)
+  maxAttempts       Int        @default(0)        // 0 = illimité
+  passingScore      Int        @default(50)       // % minimum pour réussir
+  xpReward          Int        @default(10)       // XP gagnés à la complétion
+  couponReward      Int        @default(0)        // Coupons gagnés si réussi
+  category          String?    @db.VarChar(100)
+  imageUrl          String?    @db.VarChar(500)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   quizmaster    User       @relation("quizmasterQuizzes", fields: [quizmasterId], references: [id])
   questions     Question[]
@@ -63,16 +110,20 @@ model Quiz {
 
   @@index([quizmasterId])
   @@index([brandId])
+  @@index([difficulty])
+  @@index([category])
   @@map("quizzes")
 }
 
 model Question {
-  id        Int      @id @default(autoincrement())
-  quizId    Int
-  text      String   @db.Text
-  points    Int      @default(1)
-  order     Int      @default(0)
-  createdAt DateTime @default(now())
+  id         Int        @id @default(autoincrement())
+  quizId     Int
+  text       String     @db.Text
+  points     Int        @default(1)
+  order      Int        @default(0)
+  difficulty Difficulty @default(medium)
+  hint       String?    @db.VarChar(500)
+  createdAt  DateTime   @default(now())
 
   quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
   options   Option[]
@@ -101,8 +152,11 @@ model Attempt {
   userId      Int
   score       Int       @default(0)
   maxScore    Int       @default(0)
-  completedAt DateTime?                       // null = en cours, non-null = terminé
-  duration    Int?                            // Durée en secondes
+  completedAt DateTime?
+  duration    Int?
+  passed      Boolean   @default(false)
+  xpEarned    Int       @default(0)
+  couponsEarned Int     @default(0)
   createdAt   DateTime  @default(now())
 
   quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
@@ -111,6 +165,7 @@ model Attempt {
 
   @@index([quizId])
   @@index([userId])
+  @@index([completedAt])
   @@map("attempts")
 }
 
@@ -133,18 +188,112 @@ model Answer {
   @@map("answers")
 }
 
-// ─── Gamification Module ────────────────────────────────────────────────────────
+// ─── Gamification ───────────────────────────────────────────────
 
 model PointsHistory {
   id        Int      @id @default(autoincrement())
   userId    Int
-  points    Int                              // Positif = gagné, négatif = dépensé
+  points    Int
   reason    String   @db.VarChar(255)
-  attemptId Int?                             // Lien vers la tentative si gagné via quiz
+  attemptId Int?
   createdAt DateTime @default(now())
 
   user      User     @relation("userPointsHistory", fields: [userId], references: [id])
 
   @@index([userId])
   @@map("points_history")
+}
+
+model Badge {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(100)
+  description String   @db.VarChar(500)
+  icon        String   @db.VarChar(100)     // emoji ou icon name
+  condition   String   @db.VarChar(255)     // ex: "quizzes_completed:5"
+  xpReward    Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  users       UserBadge[] @relation("badgeUsers")
+
+  @@map("badges")
+}
+
+model UserBadge {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  badgeId   Int
+  earnedAt  DateTime @default(now())
+
+  user      User     @relation("userBadges", fields: [userId], references: [id], onDelete: Cascade)
+  badge     Badge    @relation("badgeUsers", fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@map("user_badges")
+}
+
+// ─── Marketplace / Store ────────────────────────────────────────
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  brandId     Int
+  title       String   @db.VarChar(255)
+  description String?  @db.Text
+  price       Int                            // Prix en coupons
+  stock       Int      @default(0)
+  imageUrl    String?  @db.VarChar(500)
+  isActive    Boolean  @default(true)
+  category    String?  @db.VarChar(100)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  brand       User     @relation("brandProducts", fields: [brandId], references: [id])
+  orderItems  OrderItem[]
+
+  @@index([brandId])
+  @@map("products")
+}
+
+model Order {
+  id          Int         @id @default(autoincrement())
+  userId      Int
+  totalPrice  Int                            // Total en coupons
+  status      OrderStatus @default(pending)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  user        User        @relation("userOrders", fields: [userId], references: [id])
+  items       OrderItem[]
+
+  @@index([userId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        Int   @id @default(autoincrement())
+  orderId   Int
+  productId Int
+  quantity  Int   @default(1)
+  price     Int                              // Prix unitaire au moment de l'achat
+
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+// ─── Notifications ──────────────────────────────────────────────
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  type      NotificationType
+  title     String           @db.VarChar(255)
+  message   String           @db.Text
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user      User             @relation("userNotifications", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
 }

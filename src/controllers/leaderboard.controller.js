@@ -35,6 +35,22 @@ const LeaderboardController = {
         } catch (err) { next(err); }
     },
 
+    async getWeekly(req, res, next) {
+        try {
+            const filters = parseQuery(leaderboardQuerySchema, req.query);
+            const data = await LeaderboardService.getWeekly(filters);
+            res.status(200).json({ status: "success", data });
+        } catch (err) { next(err); }
+    },
+
+    async getMonthly(req, res, next) {
+        try {
+            const filters = parseQuery(leaderboardQuerySchema, req.query);
+            const data = await LeaderboardService.getMonthly(filters);
+            res.status(200).json({ status: "success", data });
+        } catch (err) { next(err); }
+    },
+
     async getByQuiz(req, res, next) {
         try {
             const { quizId } = parseParam(quizLeaderboardParamSchema, req.params);

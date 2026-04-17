@@ -15,6 +15,8 @@ const permit = require("../middlewares/role");
 router.use(auth, permit("participant", "brand", "quizmaster", "admin"));
 
 router.get("/global", LeaderboardController.getGlobal);
+router.get("/weekly", LeaderboardController.getWeekly);
+router.get("/monthly", LeaderboardController.getMonthly);
 router.get("/quiz/:quizId", LeaderboardController.getByQuiz);
 
 module.exports = router;
