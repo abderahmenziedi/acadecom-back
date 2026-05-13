@@ -10,13 +10,19 @@ const ApiError = require("../utils/ApiError");
 const AuthService = {
     /**
      * Inscription d'un nouvel utilisateur.
-     * Tous les rôles sont acceptés (participant, brand, quizmaster, admin).
+     * Rôles autorisés : participant, brand, quizmaster (admin interdit via register).
      * Si quizmaster, brandId est obligatoire et doit pointer vers un utilisateur avec rôle "brand".
      * @param {{ email: string, password: string, role?: string, brandId?: number }} data
      * @returns {{ id, email, role, brandId, brand, createdAt }}
      */
     async register(data) {
         const { name, email, password, role = "participant", brandId } = data;
+
+        // Empêcher la création d'un admin via register (seul le seed peut créer un admin)
+        const allowedRoles = ["participant", "brand", "quizmaster"];
+        if (!allowedRoles.includes(role)) {
+            throw new ApiError(400, `Le rôle '${role}' n'est pas autorisé à l'inscription. Rôles autorisés : ${allowedRoles.join(", ")}`);
+        }
 
         // Vérifier si l'email est déjà utilisé
         const existing = await prisma.user.findUnique({ where: { email } });
@@ -128,6 +134,20 @@ const AuthService = {
     async logout(userId) {
         // Ici on pourrait logger la déconnexion si nécessaire
         return { message: "Déconnexion réussie" };
+    },
+
+    /**
+     * Récupère la liste publique des brands actives (non bloquées).
+     * Utilisée pour le formulaire d'inscription des quizmasters.
+     * @returns {{ brands: Array<{ id, name, industry }> }}
+     */
+    async getBrands() {
+        const brands = await prisma.user.findMany({
+            where: { role: "brand", isBlocked: false },
+            select: { id: true, name: true, industry: true },
+            orderBy: { name: "asc" },
+        });
+        return { brands };
     },
 };
 

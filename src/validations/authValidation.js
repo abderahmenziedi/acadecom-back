@@ -5,7 +5,7 @@ const { z } = require("zod");
  * - participant: Utilisateur standard
  * - brand: Représentant de marque (peut avoir plusieurs quizmasters)
  * - quizmaster: Maître de quiz (doit sélectionner un utilisateur avec rôle "brand")
- * - admin: Administrateur système
+ * Note: admin n'est PAS autorisé à l'inscription (créé via seed uniquement)
  */
 const allowedRolesAtRegister = ["participant", "brand", "quizmaster"];
 

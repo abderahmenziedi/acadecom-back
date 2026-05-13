@@ -174,33 +174,37 @@ const AdminService = {
             throw new ApiError(403, "Impossible de supprimer un autre administrateur");
         }
 
-        // Suppression en cascade via transaction pour garantir l'intégrité
+        // Suppression en cascade contrôlée pour garantir l'intégrité
         if (user.role === "brand") {
-            // Récupérer les quizmasters de cette brand
-            const qmIds = (await prisma.user.findMany({
-                where: { brandId: targetId, role: "quizmaster" },
+            // 1. Supprimer les quizzes liés à cette brand (tous les quizmasters confondus)
+            const quizIds = (await prisma.quiz.findMany({
+                where: { brandId: targetId },
                 select: { id: true },
             })).map(q => q.id);
 
-            if (qmIds.length > 0) {
-                // Supprimer les quizzes de ces quizmasters (cascade: questions, options, attempts, answers)
-                const quizIds = (await prisma.quiz.findMany({
-                    where: { quizmasterId: { in: qmIds } },
-                    select: { id: true },
-                })).map(q => q.id);
-
-                if (quizIds.length > 0) {
-                    await prisma.answer.deleteMany({ where: { attempt: { quizId: { in: quizIds } } } });
-                    await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id) } } });
-                    await prisma.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
-                    await prisma.option.deleteMany({ where: { question: { quizId: { in: quizIds } } } });
-                    await prisma.question.deleteMany({ where: { quizId: { in: quizIds } } });
-                    await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
+            if (quizIds.length > 0) {
+                await prisma.answer.deleteMany({ where: { attempt: { quizId: { in: quizIds } } } });
+                const attemptIds = (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id);
+                if (attemptIds.length > 0) {
+                    await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: attemptIds } } });
                 }
-
-                // Supprimer les quizmasters
-                await prisma.user.deleteMany({ where: { id: { in: qmIds } } });
+                await prisma.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
+                await prisma.option.deleteMany({ where: { question: { quizId: { in: quizIds } } } });
+                await prisma.question.deleteMany({ where: { quizId: { in: quizIds } } });
+                await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
             }
+
+            // 2. Supprimer les produits de cette brand
+            await prisma.product.deleteMany({ where: { brandId: targetId } });
+
+            // 3. Détacher les quizmasters (brandId = null) — ils NE sont PAS supprimés
+            await prisma.user.updateMany({
+                where: { brandId: targetId, role: "quizmaster" },
+                data: { brandId: null },
+            });
+
+            // 4. Supprimer les notifications du brand
+            await prisma.notification.deleteMany({ where: { userId: targetId } });
         }
 
         if (user.role === "quizmaster") {
@@ -212,12 +216,18 @@ const AdminService = {
 
             if (quizIds.length > 0) {
                 await prisma.answer.deleteMany({ where: { attempt: { quizId: { in: quizIds } } } });
-                await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id) } } });
+                const attemptIds = (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id);
+                if (attemptIds.length > 0) {
+                    await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: attemptIds } } });
+                }
                 await prisma.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
                 await prisma.option.deleteMany({ where: { question: { quizId: { in: quizIds } } } });
                 await prisma.question.deleteMany({ where: { quizId: { in: quizIds } } });
                 await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
             }
+            // Supprimer les badges et notifications du quizmaster
+            await prisma.userBadge.deleteMany({ where: { userId: targetId } });
+            await prisma.notification.deleteMany({ where: { userId: targetId } });
         }
 
         if (user.role === "participant") {
@@ -225,6 +235,11 @@ const AdminService = {
             await prisma.answer.deleteMany({ where: { userId: targetId } });
             await prisma.pointsHistory.deleteMany({ where: { userId: targetId } });
             await prisma.attempt.deleteMany({ where: { userId: targetId } });
+            // Supprimer les badges, notifications, commandes du participant
+            await prisma.userBadge.deleteMany({ where: { userId: targetId } });
+            await prisma.notification.deleteMany({ where: { userId: targetId } });
+            await prisma.orderItem.deleteMany({ where: { order: { userId: targetId } } });
+            await prisma.order.deleteMany({ where: { userId: targetId } });
         }
 
         // Supprimer l'utilisateur

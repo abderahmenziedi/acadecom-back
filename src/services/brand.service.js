@@ -144,7 +144,12 @@ const BrandService = {
     },
 
     /**
-     * Supprime un brand. Échoue si des quizmasters sont encore liés.
+     * Supprime un brand avec cascade contrôlée :
+     * - Supprime les quizzes liés à cette brand (cascade: questions, options, attempts, answers)
+     * - Supprime les produits liés à cette brand
+     * - Détache les quizmasters (brandId = null) — ils ne sont PAS supprimés
+     * - Supprime les notifications du brand
+     * - Supprime le brand
      */
     async delete(id) {
         const brand = await prisma.user.findUnique({
@@ -153,7 +158,6 @@ const BrandService = {
                 id: true,
                 role: true,
                 email: true,
-                _count: { select: { quizmasters: true } },
             },
         });
 
@@ -161,13 +165,42 @@ const BrandService = {
             throw new ApiError(404, `Brand avec ID ${id} introuvable`);
         }
 
-        if (brand._count.quizmasters > 0) {
-            throw new ApiError(
-                409,
-                `Impossible de supprimer ce brand : ${brand._count.quizmasters} quizmaster(s) encore lié(s). Supprimez-les d'abord.`
-            );
+        // 1. Récupérer les quizzes de cette brand
+        const quizIds = (await prisma.quiz.findMany({
+            where: { brandId: id },
+            select: { id: true },
+        })).map(q => q.id);
+
+        if (quizIds.length > 0) {
+            // Supprimer les answers liés aux attempts de ces quizzes
+            await prisma.answer.deleteMany({ where: { attempt: { quizId: { in: quizIds } } } });
+            // Supprimer les pointsHistory liés aux attempts de ces quizzes
+            const attemptIds = (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id);
+            if (attemptIds.length > 0) {
+                await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: attemptIds } } });
+            }
+            // Supprimer les attempts
+            await prisma.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
+            // Supprimer les options puis les questions
+            await prisma.option.deleteMany({ where: { question: { quizId: { in: quizIds } } } });
+            await prisma.question.deleteMany({ where: { quizId: { in: quizIds } } });
+            // Supprimer les quizzes
+            await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
         }
 
+        // 2. Supprimer les produits de cette brand (SetNull sur OrderItem.productId)
+        await prisma.product.deleteMany({ where: { brandId: id } });
+
+        // 3. Détacher les quizmasters (brandId = null) — ils restent en base
+        await prisma.user.updateMany({
+            where: { brandId: id, role: "quizmaster" },
+            data: { brandId: null },
+        });
+
+        // 4. Supprimer les notifications du brand
+        await prisma.notification.deleteMany({ where: { userId: id } });
+
+        // 5. Supprimer le brand
         await prisma.user.delete({ where: { id } });
 
         return { id, email: brand.email };

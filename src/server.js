@@ -4,6 +4,11 @@
  * Toute la configuration Express est dans src/app.js.
  */
 require("dotenv").config();
+
+// Valider les variables d'environnement AVANT tout
+const { validateEnv } = require("./utils/envValidator");
+validateEnv();
+
 const app = require("./app");
 const logger = require("./utils/logger");
 

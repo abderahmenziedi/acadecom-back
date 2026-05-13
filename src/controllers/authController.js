@@ -55,6 +55,22 @@ const AuthController = {
             next(err);
         }
     },
+
+    /**
+     * GET /api/v1/auth/brands
+     * Route publique — Liste les brands actives pour le formulaire d'inscription quizmaster.
+     */
+    async getBrands(req, res, next) {
+        try {
+            const { brands } = await AuthService.getBrands();
+            res.status(200).json({
+                status: "success",
+                data: { brands },
+            });
+        } catch (err) {
+            next(err);
+        }
+    },
 };
 
 module.exports = AuthController;

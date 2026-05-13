@@ -19,7 +19,7 @@ const morgan = require("morgan");
 require("dotenv").config();
 
 // Routes
-const authRoutes = require("./routes/auth");
+const authRoutes = require("./routes/auth.routes");
 const adminRoutes = require("./routes/admin.routes");
 const brandRoutes = require("./routes/brand.routes");
 const quizmasterRoutes = require("./routes/quizmaster.routes");
@@ -91,9 +91,9 @@ app.get("/health", (req, res) => {
 app.use("/api/v1/auth", authRoutes);
 
 // Routes admin (protégées JWT + rôle admin)
-app.use("/api/admin", adminRoutes);
+app.use("/api/v1/admin", adminRoutes);
 
-// Routes admin — Gestion des brands et quizmasters
+// Routes brand management
 app.use("/api/v1/admin/brands", brandRoutes);
 app.use("/api/v1/admin/quizmasters", quizmasterRoutes);
 
@@ -120,29 +120,7 @@ app.use("/api/v1/gamification", gamificationRoutes);
 // Routes notifications
 app.use("/api/v1/notifications", notificationRoutes);
 
-// ─── 5. Routes protégées (exemples) ──────────────────────────────────────────
-
-// Accessible uniquement aux admin
-app.get("/api/v1/admin", auth, permit("admin"), (req, res) => {
-    res.json({ status: "success", message: `Bienvenue Admin (id: ${req.user.id})` });
-});
-
-// Accessible à tous les rôles authentifiés
-app.get("/api/v1/dashboard", auth, permit("participant", "brand", "quizmaster", "admin"), (req, res) => {
-    res.json({ status: "success", message: `Bienvenue, vous êtes connecté en tant que ${req.user.role}` });
-});
-
-// Accessible aux brand et adminAuthorization: Bearer <token>
-app.get("/api/v1/brand", auth, permit("brand", "admin"), (req, res) => {
-    res.json({ status: "success", message: "Espace Brand / Admin" });
-});
-
-// Accessible aux quizmaster et admin
-app.get("/api/v1/quiz", auth, permit("quizmaster", "admin"), (req, res) => {
-    res.json({ status: "success", message: "Espace Quizmaster / Admin" });
-});
-
-// ─── 6. Route 404 ─────────────────────────────────────────────────────────────
+// ─── 5. Route 404 ─────────────────────────────────────────────────────────────
 app.use((req, res, next) => {
     next(new ApiError(404, `La route ${req.method} ${req.originalUrl} n'existe pas`));
 });

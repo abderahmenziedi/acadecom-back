@@ -185,6 +185,10 @@ const QuizmasterService = {
             await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
         }
 
+        // Supprimer les badges et notifications du quizmaster
+        await prisma.userBadge.deleteMany({ where: { userId: id } });
+        await prisma.notification.deleteMany({ where: { userId: id } });
+
         await prisma.user.delete({ where: { id } });
 
         return { id, email: quizmaster.email };

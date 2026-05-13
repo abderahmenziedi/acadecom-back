@@ -71,6 +71,7 @@ model User {
 
   // Relations
   quizzes         Quiz[]          @relation("quizmasterQuizzes")
+  brandQuizzes    Quiz[]          @relation("brandQuizzes")
   attempts        Attempt[]       @relation("participantAttempts")
   answers         Answer[]        @relation("participantAnswers")
   pointsHistory   PointsHistory[] @relation("userPointsHistory")
@@ -104,7 +105,8 @@ model Quiz {
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
-  quizmaster    User       @relation("quizmasterQuizzes", fields: [quizmasterId], references: [id])
+  quizmaster    User       @relation("quizmasterQuizzes", fields: [quizmasterId], references: [id], onDelete: Cascade)
+  brand         User       @relation("brandQuizzes", fields: [brandId], references: [id], onDelete: Cascade)
   questions     Question[]
   attempts      Attempt[]
 
@@ -160,7 +162,7 @@ model Attempt {
   createdAt   DateTime  @default(now())
 
   quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  user      User     @relation("participantAttempts", fields: [userId], references: [id])
+  user      User     @relation("participantAttempts", fields: [userId], references: [id], onDelete: Cascade)
   answers   Answer[]
 
   @@index([quizId])
@@ -198,7 +200,7 @@ model PointsHistory {
   attemptId Int?
   createdAt DateTime @default(now())
 
-  user      User     @relation("userPointsHistory", fields: [userId], references: [id])
+  user      User     @relation("userPointsHistory", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("points_history")
@@ -246,7 +248,7 @@ model Product {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  brand       User     @relation("brandProducts", fields: [brandId], references: [id])
+  brand       User     @relation("brandProducts", fields: [brandId], references: [id], onDelete: Cascade)
   orderItems  OrderItem[]
 
   @@index([brandId])
@@ -261,7 +263,7 @@ model Order {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  user        User        @relation("userOrders", fields: [userId], references: [id])
+  user        User        @relation("userOrders", fields: [userId], references: [id], onDelete: Cascade)
   items       OrderItem[]
 
   @@index([userId])
@@ -271,12 +273,12 @@ model Order {
 model OrderItem {
   id        Int   @id @default(autoincrement())
   orderId   Int
-  productId Int
+  productId Int?
   quantity  Int   @default(1)
   price     Int                              // Prix unitaire au moment de l'achat
 
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product   Product @relation(fields: [productId], references: [id])
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@map("order_items")
 }
