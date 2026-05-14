@@ -15,8 +15,13 @@ const createProductSchema = z.object({
   description: z.string().optional(),
   price: z.number().int().positive(),
   stock: z.number().int().min(0),
-  imageUrl: z.string().url().optional().or(z.literal("")),
+  imageUrl: z
+    .string()
+    .max(500)
+    .optional()
+    .or(z.literal("")),
   category: z.string().max(100).optional(),
+  isActive: z.boolean().optional(),
 });
 
 const orderSchema = z.object({

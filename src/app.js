@@ -1,21 +1,23 @@
 /**
- * app.js - Express Application Configuration
+ * app.js — Express Application Configuration
  *
- * Configures all middleware, routes, and error handling.
- * This file is responsible for setting up the Express app structure,
- * NOT for starting the server (that's in server.js).
+ * Sets up middleware, routes, static uploads and error handling.
+ * Server startup lives in server.js.
  *
  * Security layers:
- * 1. Helmet - HTTP security headers
- * 2. CORS - Cross-Origin Resource Sharing
- * 3. Auth JWT - Token-based authentication
- * 4. RBAC - Role-Based Access Control
- * 5. Global Error Handler - Centralized error management
+ *  1. Helmet              — HTTP security headers
+ *  2. CORS                — Cross-Origin Resource Sharing
+ *  3. JWT (auth.js)       — Token-based authentication
+ *  4. RBAC (role.js)      — Role-Based Access Control
+ *  5. Multer (upload.js)  — File upload sandboxing
+ *  6. errorHandler.js     — Centralized error responses
  */
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
+const path = require("path");
+const multer = require("multer");
 require("dotenv").config();
 
 // Routes
@@ -32,19 +34,26 @@ const leaderboardRoutes = require("./routes/leaderboard.routes");
 const storeRoutes = require("./routes/store.routes");
 const gamificationRoutes = require("./routes/gamification.routes");
 const notificationRoutes = require("./routes/notification.routes");
+const profileRoutes = require("./routes/profile.routes");
+const uploadRoutes = require("./routes/upload.routes");
+const activityRoutes = require("./routes/activity.routes");
 
 // Middlewares
-const auth = require("./middlewares/auth");
-const permit = require("./middlewares/role");
 const errorHandler = require("./middlewares/errorHandler");
 const ApiError = require("./utils/ApiError");
+const { UPLOAD_ROOT } = require("./middlewares/upload");
 
 const app = express();
 
 // ─── 1. Sécurité HTTP ─────────────────────────────────────────────────────────
-app.use(helmet());
+// Disable crossOriginResourcePolicy so uploaded files load from the frontend origin.
+app.use(
+    helmet({
+        crossOriginResourcePolicy: { policy: "cross-origin" },
+    })
+);
 
-// ─── 2. CORS (à restreindre en production avec la vraie URL du frontend) ──────
+// ─── 2. CORS ──────────────────────────────────────────────────────────────────
 const corsOptions = {
     origin: process.env.CLIENT_URL || "*",
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
@@ -53,79 +62,70 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // ─── 3. Logging & Parsing ─────────────────────────────────────────────────────
-app.use(morgan("dev")); // Log HTTP : méthode, route, status, temps
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(morgan("dev"));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
-// ─── 4. Routes publiques ──────────────────────────────────────────────────────
-// Route racine (accueil)
-app.get("/", (req, res) => {
+// ─── 4. Static uploads (public files) ─────────────────────────────────────────
+app.use(
+    "/uploads",
+    express.static(UPLOAD_ROOT, {
+        maxAge: "7d",
+        fallthrough: false,
+    })
+);
+
+// ─── 5. Public routes ─────────────────────────────────────────────────────────
+app.get("/", (_req, res) => {
     res.status(200).json({
         status: "success",
-        message: "🎓 Bienvenue sur l'API AcademCom Backend",
-        endpoints: {
-            health: "GET /health",
-            register: "POST /api/v1/auth/register",
-            login: "POST /api/v1/auth/login",
-            logout: "POST /api/v1/auth/logout",
-            adminUsers: "GET /api/admin/users",
-            adminBlock: "PATCH /api/admin/users/:id/block",
-            adminUnblock: "PATCH /api/admin/users/:id/unblock",
-            adminDelete: "DELETE /api/admin/users/:id",
-            adminExportCsv: "GET /api/admin/users/export/csv",
-        },
+        message: "🎓 Bienvenue sur l'API AcadeCom",
+        version: "v1",
+        docs: "/api/v1",
     });
 });
 
-// Route de health check
-app.get("/health", (req, res) => {
+app.get("/health", (_req, res) => {
     res.status(200).json({
         status: "success",
-        message: "Serveur en bonne santé ✅",
+        message: "Serveur en bonne santé",
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
     });
 });
 
-// Routes authentification
+// ─── 6. API routes ────────────────────────────────────────────────────────────
 app.use("/api/v1/auth", authRoutes);
-
-// Routes admin (protégées JWT + rôle admin)
 app.use("/api/v1/admin", adminRoutes);
-
-// Routes brand management
 app.use("/api/v1/admin/brands", brandRoutes);
 app.use("/api/v1/admin/quizmasters", quizmasterRoutes);
-
-// Routes brand — Self-service + analytics
 app.use("/api/v1/brand", brandSelfRoutes);
-
-// Routes quizmaster — Quiz module
 app.use("/api/v1/quizmaster/quizzes", quizRoutes);
 app.use("/api/v1/quizmaster/questions", questionRoutes);
 app.use("/api/v1/quizmaster/dashboard", analyticsRoutes);
-
-// Routes participant — Module complet (profil, quiz, historique, wallet, recommandations)
 app.use("/api/v1/participant", participantRoutes);
-
-// Routes leaderboard — Classements
 app.use("/api/v1/leaderboard", leaderboardRoutes);
-
-// Routes store — Marketplace / Boutique
 app.use("/api/v1/store", storeRoutes);
-
-// Routes gamification — XP, niveaux, badges
 app.use("/api/v1/gamification", gamificationRoutes);
-
-// Routes notifications
 app.use("/api/v1/notifications", notificationRoutes);
+app.use("/api/v1/profile", profileRoutes);
+app.use("/api/v1/uploads", uploadRoutes);
+app.use("/api/v1/activity", activityRoutes);
 
-// ─── 5. Route 404 ─────────────────────────────────────────────────────────────
-app.use((req, res, next) => {
+// ─── 7. 404 ───────────────────────────────────────────────────────────────────
+app.use((req, _res, next) => {
     next(new ApiError(404, `La route ${req.method} ${req.originalUrl} n'existe pas`));
 });
 
-// ─── 7. Middleware global d'erreurs (DOIT être en dernier) ───────────────────
+// ─── 8. Multer errors mapped to ApiError ──────────────────────────────────────
+app.use((err, _req, _res, next) => {
+    if (err instanceof multer.MulterError) {
+        return next(new ApiError(400, `Erreur d'upload: ${err.message}`));
+    }
+    next(err);
+});
+
+// ─── 9. Global error handler (last) ───────────────────────────────────────────
 app.use(errorHandler);
 
 module.exports = app;

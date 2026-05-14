@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// AcadeCom — Prisma Schema v2.0 (Production-Ready)
+// AcadeCom — Prisma Schema v2.1 (Production-Ready)
 // ═══════════════════════════════════════════════════════════════
 
 generator client {
@@ -37,9 +37,33 @@ enum NotificationType {
   badge_earned
   level_up
   quiz_completed
+  quiz_played
+  quiz_created
+  quiz_deleted
   order_confirmed
+  coupon_used
   reward_earned
+  account_blocked
+  account_unblocked
   system
+}
+
+enum ActivityAction {
+  user_login
+  user_register
+  brand_block_quizmaster
+  brand_unblock_quizmaster
+  brand_delete_quizmaster
+  brand_disable_quiz
+  brand_enable_quiz
+  brand_delete_quiz
+  brand_update_profile
+  quizmaster_create_quiz
+  quizmaster_update_quiz
+  quizmaster_delete_quiz
+  participant_take_quiz
+  participant_order
+  admin_action
 }
 
 // ─── User ───────────────────────────────────────────────────────
@@ -53,7 +77,14 @@ model User {
   isBlocked     Boolean   @default(false)
   avatar        String?   @db.VarChar(500)
 
-  // Brand fields
+  // Profile fields
+  phone         String?   @db.VarChar(40)
+  bio           String?   @db.Text
+  address       String?   @db.VarChar(255)
+  website       String?   @db.VarChar(255)
+  socialLinks   String?   @db.Text  // JSON string of { facebook, twitter, instagram, linkedin }
+
+  // Brand-specific
   brandId       Int?
   industry      String?   @db.VarChar(100)
   description   String?   @db.Text
@@ -79,6 +110,8 @@ model User {
   notifications   Notification[]  @relation("userNotifications")
   orders          Order[]         @relation("userOrders")
   products        Product[]       @relation("brandProducts")
+  activitiesOwn   ActivityLog[]   @relation("activityActor")
+  activitiesScope ActivityLog[]   @relation("activityScope")
 
   @@map("users")
 }
@@ -96,10 +129,10 @@ model Quiz {
   shuffleQuestions  Boolean    @default(false)
   isActive          Boolean    @default(false)
   difficulty        Difficulty @default(medium)
-  maxAttempts       Int        @default(0)        // 0 = illimité
-  passingScore      Int        @default(50)       // % minimum pour réussir
-  xpReward          Int        @default(10)       // XP gagnés à la complétion
-  couponReward      Int        @default(0)        // Coupons gagnés si réussi
+  maxAttempts       Int        @default(0)
+  passingScore      Int        @default(50)
+  xpReward          Int        @default(10)
+  couponReward      Int        @default(0)
   category          String?    @db.VarChar(100)
   imageUrl          String?    @db.VarChar(500)
   createdAt         DateTime   @default(now())
@@ -176,6 +209,7 @@ model Answer {
   attemptId  Int
   questionId Int
   optionId   Int
+  userId     Int?
   isCorrect  Boolean  @default(false)
   createdAt  DateTime @default(now())
 
@@ -183,7 +217,6 @@ model Answer {
   question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
   option     Option   @relation(fields: [optionId], references: [id], onDelete: Cascade)
   user       User?    @relation("participantAnswers", fields: [userId], references: [id])
-  userId     Int?
 
   @@index([attemptId])
   @@index([questionId])
@@ -210,8 +243,8 @@ model Badge {
   id          Int      @id @default(autoincrement())
   name        String   @db.VarChar(100)
   description String   @db.VarChar(500)
-  icon        String   @db.VarChar(100)     // emoji ou icon name
-  condition   String   @db.VarChar(255)     // ex: "quizzes_completed:5"
+  icon        String   @db.VarChar(100)
+  condition   String   @db.VarChar(255)
   xpReward    Int      @default(0)
   createdAt   DateTime @default(now())
 
@@ -240,7 +273,7 @@ model Product {
   brandId     Int
   title       String   @db.VarChar(255)
   description String?  @db.Text
-  price       Int                            // Prix en coupons
+  price       Int
   stock       Int      @default(0)
   imageUrl    String?  @db.VarChar(500)
   isActive    Boolean  @default(true)
@@ -258,7 +291,7 @@ model Product {
 model Order {
   id          Int         @id @default(autoincrement())
   userId      Int
-  totalPrice  Int                            // Total en coupons
+  totalPrice  Int
   status      OrderStatus @default(pending)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
@@ -275,7 +308,7 @@ model OrderItem {
   orderId   Int
   productId Int?
   quantity  Int   @default(1)
-  price     Int                              // Prix unitaire au moment de l'achat
+  price     Int
 
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
@@ -291,11 +324,34 @@ model Notification {
   type      NotificationType
   title     String           @db.VarChar(255)
   message   String           @db.Text
+  link      String?          @db.VarChar(500)
   isRead    Boolean          @default(false)
   createdAt DateTime         @default(now())
 
   user      User             @relation("userNotifications", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isRead])
+  @@index([userId, createdAt])
   @@map("notifications")
+}
+
+// ─── Activity / Audit Log ───────────────────────────────────────
+
+model ActivityLog {
+  id         Int            @id @default(autoincrement())
+  actorId    Int                                  // who performed the action
+  scopeId    Int?                                 // resource owner (brand id, target user, etc.)
+  action     ActivityAction
+  entityType String?        @db.VarChar(50)       // e.g. "quiz", "user", "order"
+  entityId   Int?
+  metadata   String?        @db.Text              // JSON string
+  createdAt  DateTime       @default(now())
+
+  actor      User           @relation("activityActor", fields: [actorId], references: [id], onDelete: Cascade)
+  scope      User?          @relation("activityScope", fields: [scopeId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([scopeId])
+  @@index([action])
+  @@map("activity_logs")
 }

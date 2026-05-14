@@ -26,6 +26,11 @@ const getUsersQuerySchema = z.object({
             message: "Le rôle doit être: participant, brand, quizmaster ou admin",
         }),
     }).optional(),
+    search: z.string().max(100).optional(),
+    isBlocked: z
+        .enum(["true", "false"])
+        .optional()
+        .transform((v) => (v === "true" ? true : v === "false" ? false : undefined)),
     page: z.coerce.number().int("page doit être un entier").min(1, "page doit être >= 1").default(1),
     limit: z.coerce.number().int("limit doit être un entier").min(1, "limit doit être >= 1").max(100, "limit doit être <= 100").default(10),
 });

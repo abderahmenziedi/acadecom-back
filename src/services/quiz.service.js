@@ -1,5 +1,7 @@
 const prisma = require("../config/prisma");
 const ApiError = require("../utils/ApiError");
+const NotificationService = require("./notification.service");
+const ActivityLogService = require("./activityLog.service");
 
 /**
  * Champs retournés pour un quiz.
@@ -14,6 +16,13 @@ const quizSelect = {
     pointsPerQuestion: true,
     shuffleQuestions: true,
     isActive: true,
+    imageUrl: true,
+    category: true,
+    difficulty: true,
+    passingScore: true,
+    xpReward: true,
+    couponReward: true,
+    maxAttempts: true,
     createdAt: true,
     updatedAt: true,
     _count: { select: { questions: true, attempts: true } },
@@ -51,10 +60,35 @@ const QuizService = {
                 timeLimit: data.timeLimit || null,
                 pointsPerQuestion: data.pointsPerQuestion ?? 1,
                 shuffleQuestions: data.shuffleQuestions ?? false,
+                imageUrl: data.imageUrl || null,
+                category: data.category || null,
+                difficulty: data.difficulty || "medium",
+                passingScore: data.passingScore ?? 50,
+                xpReward: data.xpReward ?? 10,
+                couponReward: data.couponReward ?? 0,
                 quizmasterId,
                 brandId,
             },
             select: quizSelect,
+        });
+
+        const qm = await prisma.user.findUnique({
+            where: { id: quizmasterId },
+            select: { name: true },
+        });
+        await NotificationService.notifyQuizCreated({
+            brandId,
+            quizmasterName: qm?.name || "Un quizmaster",
+            quizTitle: quiz.title,
+            quizId: quiz.id,
+        });
+        await ActivityLogService.log({
+            actorId: quizmasterId,
+            scopeId: brandId,
+            action: "quizmaster_create_quiz",
+            entityType: "quiz",
+            entityId: quiz.id,
+            metadata: { title: quiz.title },
         });
         return quiz;
     },
@@ -139,6 +173,15 @@ const QuizService = {
             select: quizSelect,
         });
 
+        await ActivityLogService.log({
+            actorId: quizmasterId,
+            scopeId: updated.brandId,
+            action: "quizmaster_update_quiz",
+            entityType: "quiz",
+            entityId: quizId,
+            metadata: { title: updated.title, fields: Object.keys(data) },
+        });
+
         return updated;
     },
 
@@ -146,13 +189,37 @@ const QuizService = {
      * Supprime un quiz (cascade : questions, options, attempts, answers).
      */
     async delete(quizId, quizmasterId) {
-        const quiz = await ensureQuizOwnership(quizId, quizmasterId);
+        await ensureQuizOwnership(quizId, quizmasterId);
 
-        if (quiz.isActive) {
+        const full = await prisma.quiz.findUnique({
+            where: { id: quizId },
+            select: { id: true, title: true, brandId: true, isActive: true },
+        });
+
+        if (full.isActive) {
             throw new ApiError(400, "Impossible de supprimer un quiz actif. Désactivez-le d'abord.");
         }
 
+        const qm = await prisma.user.findUnique({
+            where: { id: quizmasterId },
+            select: { name: true },
+        });
+
         await prisma.quiz.delete({ where: { id: quizId } });
+
+        await NotificationService.notifyQuizDeleted({
+            brandId: full.brandId,
+            quizmasterName: qm?.name,
+            quizTitle: full.title,
+        });
+        await ActivityLogService.log({
+            actorId: quizmasterId,
+            scopeId: full.brandId,
+            action: "quizmaster_delete_quiz",
+            entityType: "quiz",
+            entityId: quizId,
+            metadata: { title: full.title },
+        });
 
         return { id: quizId };
     },

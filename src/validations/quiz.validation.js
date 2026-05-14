@@ -16,6 +16,15 @@ const quizIdParamSchema = z.object({
     id: positiveIntSchema,
 });
 
+const imagePathSchema = z
+    .string()
+    .max(500, "URL trop longue")
+    .trim()
+    .optional()
+    .nullable();
+
+const difficultySchema = z.enum(["easy", "medium", "hard"]).optional();
+
 // Validation pour la création d'un quiz
 const createQuizSchema = z.object({
     title: z
@@ -45,6 +54,12 @@ const createQuizSchema = z.object({
     shuffleQuestions: z
         .boolean()
         .default(false),
+    imageUrl: imagePathSchema,
+    category: z.string().max(100).trim().optional().nullable(),
+    difficulty: difficultySchema,
+    passingScore: z.number().int().min(0).max(100).optional(),
+    xpReward: z.number().int().min(0).max(1000).optional(),
+    couponReward: z.number().int().min(0).max(1000).optional(),
 });
 
 // Validation pour la mise à jour d'un quiz
@@ -80,6 +95,12 @@ const updateQuizSchema = z.object({
     isActive: z
         .boolean()
         .optional(),
+    imageUrl: imagePathSchema,
+    category: z.string().max(100).trim().optional().nullable(),
+    difficulty: difficultySchema,
+    passingScore: z.number().int().min(0).max(100).optional(),
+    xpReward: z.number().int().min(0).max(1000).optional(),
+    couponReward: z.number().int().min(0).max(1000).optional(),
 }).refine(
     (data) => Object.keys(data).length > 0,
     { message: "Au moins un champ doit être fourni pour la mise à jour" }

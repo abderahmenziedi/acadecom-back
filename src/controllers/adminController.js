@@ -39,8 +39,8 @@ const AdminController = {
                 return next(new ApiError(400, messages || "Paramètres invalides"));
             }
 
-            const { role, page, limit } = result.data;
-            const data = await AdminService.getAllUsers({ role, page, limit });
+            const { role, page, limit, search, isBlocked } = result.data;
+            const data = await AdminService.getAllUsers({ role, page, limit, search, isBlocked });
 
             res.status(200).json({
                 status: "success",

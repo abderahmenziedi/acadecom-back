@@ -1,5 +1,8 @@
 const prisma = require("../config/prisma");
 const ApiError = require("../utils/ApiError");
+const NotificationService = require("./notification.service");
+const ActivityLogService = require("./activityLog.service");
+const { deleteByPublicUrl } = require("../middlewares/upload");
 
 /**
  * StoreService — Marketplace logic for products, cart, and orders.
@@ -158,6 +161,37 @@ const StoreService = {
         },
       }),
     ]);
+
+    // Notifications fan-out (best effort)
+    try {
+      const participant = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      const brandIds = [...new Set(products.map((p) => p.brandId))];
+      await NotificationService.notifyOrderConfirmed({
+        userId,
+        orderId: order.id,
+        totalPrice,
+      });
+      await NotificationService.notifyCouponUsed({
+        brandIds,
+        participantName: participant?.name,
+        totalPrice,
+        items: orderItems.map((oi) => {
+          const p = productMap.get(oi.productId);
+          return { title: p?.title, quantity: oi.quantity };
+        }),
+      });
+      await ActivityLogService.log({
+        actorId: userId,
+        scopeId: brandIds[0] || null,
+        action: "participant_order",
+        entityType: "order",
+        entityId: order.id,
+        metadata: { totalPrice, items: orderItems.length },
+      });
+    } catch (_) { /* ignore */ }
 
     return order;
   },

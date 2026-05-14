@@ -27,8 +27,16 @@ const AdminService = {
      * @param {{ role?: string, page: number, limit: number }} options
      * @returns {{ users: Array, total: number, page: number, totalPages: number }}
      */
-    async getAllUsers({ role, page = 1, limit = 10 }) {
-        const where = role ? { role } : {};
+    async getAllUsers({ role, search, isBlocked, page = 1, limit = 10 }) {
+        const where = {};
+        if (role) where.role = role;
+        if (typeof isBlocked === "boolean") where.isBlocked = isBlocked;
+        if (search) {
+            where.OR = [
+                { name: { contains: search } },
+                { email: { contains: search } },
+            ];
+        }
         const skip = (page - 1) * limit;
 
         const [users, total] = await prisma.$transaction([

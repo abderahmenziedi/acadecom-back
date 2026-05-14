@@ -1,6 +1,67 @@
 const prisma = require("../config/prisma");
 const ApiError = require("../utils/ApiError");
 const GamificationService = require("./gamification.service");
+const NotificationService = require("./notification.service");
+const ActivityLogService = require("./activityLog.service");
+
+/**
+ * Fires the post-quiz notifications (participant, quizmaster, brand) and audit log.
+ * Best-effort: catches its own errors so it never breaks the response.
+ */
+async function fanoutQuizPlayed(userId, quizId, score, maxScore, gamification) {
+    try {
+        const [participant, quiz] = await Promise.all([
+            prisma.user.findUnique({ where: { id: userId }, select: { name: true } }),
+            prisma.quiz.findUnique({
+                where: { id: quizId },
+                select: { id: true, title: true, quizmasterId: true, brandId: true },
+            }),
+        ]);
+        if (!quiz) return;
+
+        await NotificationService.notifyParticipantQuizPlayed({
+            userId,
+            quizTitle: quiz.title,
+            score,
+            maxScore,
+            xpEarned: gamification?.xpEarned || 0,
+            couponsEarned: gamification?.couponsEarned || 0,
+        });
+
+        await NotificationService.notifyQuizPlayed({
+            quizmasterId: quiz.quizmasterId,
+            brandId: quiz.brandId,
+            participantName: participant?.name || "Un participant",
+            quizTitle: quiz.title,
+            score,
+            maxScore,
+            quizId: quiz.id,
+        });
+
+        await ActivityLogService.log({
+            actorId: userId,
+            scopeId: quiz.brandId,
+            action: "participant_take_quiz",
+            entityType: "quiz",
+            entityId: quiz.id,
+            metadata: { score, maxScore, title: quiz.title },
+        });
+
+        // Milestone notifications to quizmaster (10/50/100/500 attempts).
+        try {
+            const count = await prisma.attempt.count({ where: { quizId: quiz.id, completedAt: { not: null } } });
+            const milestones = [10, 50, 100, 500];
+            if (milestones.includes(count)) {
+                await NotificationService.notifyQuizStatsMilestone({
+                    quizmasterId: quiz.quizmasterId,
+                    quizTitle: quiz.title,
+                    milestone: count,
+                    quizId: quiz.id,
+                });
+            }
+        } catch (_) { /* ignore */ }
+    } catch (_) { /* ignore notification errors */ }
+}
 
 /**
  * ParticipantService — Logique métier complète du module Participant.
@@ -316,6 +377,8 @@ const ParticipantService = {
             passingScore: attempt.quiz.passingScore || 50,
         });
 
+        await fanoutQuizPlayed(userId, attempt.quizId, score, attempt.maxScore, gamification);
+
         return {
             ...updatedAttempt,
             totalQuestions: attempt.quiz.questions.length,
@@ -416,6 +479,8 @@ const ParticipantService = {
             couponReward: attempt.quiz.couponReward || 0,
             passingScore: attempt.quiz.passingScore || 50,
         });
+
+        await fanoutQuizPlayed(userId, attempt.quizId, score, attempt.maxScore, gamification);
 
         return {
             ...updatedAttempt,
