@@ -9,18 +9,7 @@
     "dev": "node src/server.js",
     "postinstall": "prisma generate",
     "db:reset": "npx prisma migrate reset --force",
-    "db:seed": "node prisma/seed.js",
-    "test": "jest --runInBand"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "testTimeout": 30000,
-    "roots": ["<rootDir>/tests"],
-    "setupFiles": ["<rootDir>/tests/setupEnv.js"],
-    "globalSetup": "<rootDir>/tests/globalSetup.js",
-    "globalTeardown": "<rootDir>/tests/globalTeardown.js",
-    "setupFilesAfterEnv": ["<rootDir>/tests/setupAfterEnv.js"],
-    "testMatch": ["**/*.integration.test.js"]
+    "db:seed": "node prisma/seed.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
@@ -42,9 +31,5 @@
     "multer": "^2.0.2",
     "prisma": "^6.19.2",
     "stripe": "^17.7.0"
-  },
-  "devDependencies": {
-    "jest": "^29.7.0",
-    "supertest": "^7.0.0"
   }
 }

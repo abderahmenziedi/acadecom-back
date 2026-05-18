@@ -7,8 +7,12 @@ const {
   isValidEmail,
 } = require("../utils/participantProfileComplete");
 const { normalizePhoneE164 } = require("../utils/normalizePhone");
-
 const { shuffleArray } = require("../utils/shuffle");
+const { hydrateQuestions } = require("../utils/questionOptionsJson");
+const {
+  mergePreAnswersForQuiz,
+  participantHasAnswersForQuizRows,
+} = require("../utils/preAnswersJson");
 
 async function resolveParticipant(userId) {
   const p = await prisma.participant.findUnique({ where: { userId } });
@@ -206,32 +210,39 @@ async function startQuizAttempt(userId, quizId) {
   if (!quiz) throw new ApiError(404, "Quiz introuvable");
   if (!quiz.isActive) throw new ApiError(400, "Quiz inactif");
 
-  const played = await prisma.gameSession.findUnique({
-    where: { participantId_quizId: { participantId: participant.id, quizId } },
+  const played = await prisma.quizAttempt.findFirst({
+    where: {
+      participantId: participant.id,
+      quizId,
+      completedAt: { not: null },
+    },
   });
   if (played) {
     throw new ApiError(409, "Vous avez déjà terminé ce quiz.");
   }
 
-  const existing = await prisma.participantQuizAttempt.findUnique({
+  const existing = await prisma.quizAttempt.findUnique({
     where: { participantId_quizId: { participantId: participant.id, quizId } },
   });
   if (existing) {
-    return { alreadyStarted: true, startedAt: existing.createdAt };
+    return { alreadyStarted: true, startedAt: existing.reservedAt };
   }
 
   try {
-    const row = await prisma.participantQuizAttempt.create({
-      data: { participantId: participant.id, quizId },
+    const row = await prisma.quizAttempt.create({
+      data: {
+        participantId: participant.id,
+        quizId,
+      },
     });
-    return { started: true, startedAt: row.createdAt };
+    return { started: true, startedAt: row.reservedAt };
   } catch (e) {
     if (e.code === "P2002") {
-      const again = await prisma.participantQuizAttempt.findUnique({
+      const again = await prisma.quizAttempt.findUnique({
         where: { participantId_quizId: { participantId: participant.id, quizId } },
       });
       if (again) {
-        return { alreadyStarted: true, startedAt: again.createdAt };
+        return { alreadyStarted: true, startedAt: again.reservedAt };
       }
     }
     throw e;
@@ -249,16 +260,11 @@ async function participantHasCompletedPreQuestions(participantDbId, quizId) {
   if (!quiz || !quiz.hasPreQuestions || quiz.preQuestions.length === 0) return true;
 
   const ids = quiz.preQuestions.map((p) => p.id);
-  const rows = await prisma.preAnswer.findMany({
-    where: { participantId: participantDbId, preQuestionId: { in: ids } },
-    select: { preQuestionId: true, answerText: true },
+  const participantRow = await prisma.participant.findUnique({
+    where: { id: participantDbId },
+    select: { preAnswersJson: true },
   });
-  const map = new Map(rows.map((r) => [r.preQuestionId, r.answerText]));
-  for (const pqid of ids) {
-    const t = map.get(pqid);
-    if (!t || !String(t).trim()) return false;
-  }
-  return true;
+  return participantHasAnswersForQuizRows(participantRow?.preAnswersJson, quizId, ids);
 }
 
 async function submitPreQuizAnswers(userId, quizId, rawBody) {
@@ -275,12 +281,16 @@ async function submitPreQuizAnswers(userId, quizId, rawBody) {
     throw new ApiError(400, "Ce quiz n'utilise pas de pré-questions.");
   }
 
-  const played = await prisma.gameSession.findUnique({
-    where: { participantId_quizId: { participantId: participant.id, quizId } },
+  const played = await prisma.quizAttempt.findFirst({
+    where: {
+      participantId: participant.id,
+      quizId,
+      completedAt: { not: null },
+    },
   });
   if (played) throw new ApiError(409, "Quiz déjà joué");
 
-  const attempt = await prisma.participantQuizAttempt.findUnique({
+  const attempt = await prisma.quizAttempt.findUnique({
     where: { participantId_quizId: { participantId: participant.id, quizId } },
   });
   if (!attempt) {
@@ -323,38 +333,18 @@ async function submitPreQuizAnswers(userId, quizId, rawBody) {
     throw new ApiError(400, "Répondez à toutes les pré-questions du quiz.");
   }
 
-  await prisma.$transaction(
-    answers.map((row) =>
-      prisma.preAnswer.upsert({
-        where: {
-          preQuestionId_participantId: {
-            preQuestionId: Number(row.preQuestionId),
-            participantId: participant.id,
-          },
-        },
-        create: {
-          preQuestionId: Number(row.preQuestionId),
-          participantId: participant.id,
-          answerText: String(row.answerText).trim(),
-        },
-        update: {
-          answerText: String(row.answerText).trim(),
-        },
-      }),
-    ),
-  );
+  await prisma.participant.update({
+    where: { id: participant.id },
+    data: {
+      preAnswersJson: mergePreAnswersForQuiz(participant.preAnswersJson, quizId, answers),
+    },
+  });
 
   return { preQuestionsComplete: true };
 }
 
 async function listParticipantQuizzes(participantDbId) {
-  const attemptedRows = await prisma.gameSession.findMany({
-    where: { participantId: participantDbId },
-    select: { quizId: true },
-  });
-  const sessionSet = new Set(attemptedRows.map((r) => r.quizId));
-
-  const attemptRows = await prisma.participantQuizAttempt.findMany({
+  const attemptRows = await prisma.quizAttempt.findMany({
     where: { participantId: participantDbId },
     select: { quizId: true },
   });
@@ -378,7 +368,7 @@ async function listParticipantQuizzes(participantDbId) {
 
   return quizzes.map((q) => ({
     ...q,
-    hasAttempted: sessionSet.has(q.id) || attemptSet.has(q.id),
+    hasAttempted: attemptSet.has(q.id),
   }));
 }
 
@@ -390,12 +380,16 @@ async function getQuizForPlay(quizId, participantDbId) {
   if (!meta) throw new ApiError(404, "Quiz introuvable");
   if (!meta.isActive) throw new ApiError(400, "Quiz inactif");
 
-  const played = await prisma.gameSession.findUnique({
-    where: { participantId_quizId: { participantId: participantDbId, quizId } },
+  const played = await prisma.quizAttempt.findFirst({
+    where: {
+      participantId: participantDbId,
+      quizId,
+      completedAt: { not: null },
+    },
   });
   if (played) throw new ApiError(409, "Quiz déjà joué");
 
-  const attempt = await prisma.participantQuizAttempt.findUnique({
+  const attempt = await prisma.quizAttempt.findUnique({
     where: { participantId_quizId: { participantId: participantDbId, quizId } },
   });
   if (!attempt) {
@@ -411,7 +405,6 @@ async function getQuizForPlay(quizId, participantDbId) {
       preQuestions: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       questions: {
         orderBy: { id: "asc" },
-        include: { options: { orderBy: { id: "asc" }, select: { id: true, text: true } } },
       },
     },
   });
@@ -445,9 +438,9 @@ async function getQuizForPlay(quizId, participantDbId) {
     };
   }
 
-  let questions = quiz.questions.map((q) => ({
+  let questions = hydrateQuestions(quiz.questions).map((q) => ({
     ...q,
-    options: q.options.map((o) => ({ ...o })),
+    options: q.options.map((o) => ({ id: o.id, text: o.text })),
   }));
 
   if (quiz.randomizeQuestions) {
@@ -475,8 +468,12 @@ async function getQuizForPlay(quizId, participantDbId) {
 
 async function getSessionResult(userId, sessionId) {
   const p = await resolveParticipant(userId);
-  const session = await prisma.gameSession.findFirst({
-    where: { id: sessionId, participantId: p.id },
+  const session = await prisma.quizAttempt.findFirst({
+    where: {
+      id: sessionId,
+      participantId: p.id,
+      completedAt: { not: null },
+    },
     include: { quiz: { select: { id: true, title: true } } },
   });
   if (!session) throw new ApiError(404, "Résultat introuvable");
@@ -493,7 +490,7 @@ async function getSessionResult(userId, sessionId) {
       xpEarned: session.xpEarned,
       couponsEarned: session.couponsEarned,
       passed: session.passed,
-      playedAt: session.playedAt,
+      playedAt: session.completedAt,
       quiz: session.quiz,
     },
     xp: fresh.xp,
@@ -504,11 +501,18 @@ async function getSessionResult(userId, sessionId) {
 
 async function listSessions(userId) {
   const p = await resolveParticipant(userId);
-  return prisma.gameSession.findMany({
-    where: { participantId: p.id },
-    orderBy: { playedAt: "desc" },
+  const rows = await prisma.quizAttempt.findMany({
+    where: {
+      participantId: p.id,
+      completedAt: { not: null },
+    },
+    orderBy: { completedAt: "desc" },
     include: { quiz: { select: { id: true, title: true, category: true } } },
   });
+  return rows.map((s) => ({
+    ...s,
+    playedAt: s.completedAt,
+  }));
 }
 
 module.exports = {

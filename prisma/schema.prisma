@@ -135,13 +135,13 @@ model Participant {
   city               String?
   profilePhotoUrl    String?
   isProfileComplete  Boolean   @default(false)
+  /** Pré-réponses [{ quizId, preQuestionId, answerText }] */
+  preAnswersJson     Json      @default("[]")
   user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   xpRank             XpRank    @relation(fields: [xpRankId], references: [id])
 
-  sessions     GameSession[]
   orders       Order[]
-  preAnswers   PreAnswer[]
-  quizAttempts ParticipantQuizAttempt[]
+  quizAttempts QuizAttempt[]
 }
 
 model XpRank {
@@ -174,16 +174,24 @@ model Quiz {
   quizmaster    Quizmaster    @relation(fields: [quizmasterId], references: [id], onDelete: Cascade)
   questions     Question[]
   preQuestions  PreQuestion[]
-  sessions      GameSession[]
-  quizAttempts  ParticipantQuizAttempt[]
+  quizAttempts  QuizAttempt[]
 }
 
-/** Une entrée = le participant a engagé sa tentative unique (dès le clic « Jouer » / début du flux). */
-model ParticipantQuizAttempt {
-  id            Int      @id @default(autoincrement())
-  participantId Int
-  quizId        Int
-  createdAt     DateTime @default(now())
+/** Réservation + session de jeu (remplace ParticipantQuizAttempt + GameSession + Answer). */
+model QuizAttempt {
+  id              Int       @id @default(autoincrement())
+  participantId   Int
+  quizId          Int
+  reservedAt      DateTime  @default(now())
+  /** null = démarré, pas encore joué */
+  completedAt     DateTime?
+  scorePercent    Float     @default(0)
+  xpEarned        Int       @default(0)
+  couponsEarned   Int       @default(0)
+  passed          Boolean   @default(false)
+  durationSeconds Int       @default(0)
+  /** [{ questionId, selectedOptionIds, isCorrect }] */
+  responses       Json?
 
   participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
   quiz        Quiz        @relation(fields: [quizId], references: [id], onDelete: Cascade)
@@ -198,73 +206,20 @@ model PreQuestion {
   questionText String @db.Text
   sortOrder    Int    @default(0)
   quiz         Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  answers      PreAnswer[]
 
   @@index([quizId])
 }
 
-model PreAnswer {
-  id             Int      @id @default(autoincrement())
-  preQuestionId  Int
-  participantId  Int
-  answerText     String   @db.Text
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  preQuestion PreQuestion @relation(fields: [preQuestionId], references: [id], onDelete: Cascade)
-  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
-
-  @@unique([preQuestionId, participantId])
-}
-
 model Question {
-  id         Int     @id @default(autoincrement())
-  quizId     Int
-  text       String  @db.Text
-  xpReward   Int     @default(10)
-  hint       String?
+  id       Int     @id @default(autoincrement())
+  quizId   Int
+  text     String  @db.Text
+  xpReward Int     @default(10)
+  hint     String?
+  /** [{ id, text, isCorrect }] */
+  options  Json
 
-  quiz    Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  options Option[]
-  answers Answer[]
-}
-
-model Option {
-  id         Int    @id @default(autoincrement())
-  questionId Int
-  text       String @db.VarChar(500)
-  isCorrect  Boolean @default(false)
-
-  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
-}
-
-model GameSession {
-  id              Int @id @default(autoincrement())
-  participantId   Int
-  quizId          Int
-  scorePercent    Float   @default(0)
-  xpEarned        Int     @default(0)
-  couponsEarned   Int     @default(0)
-  passed          Boolean @default(false)
-  durationSeconds Int     @default(0)
-  playedAt        DateTime @default(now())
-
-  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
-  quiz        Quiz        @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  answers     Answer[]
-
-  @@unique([participantId, quizId])
-}
-
-model Answer {
-  id                Int @id @default(autoincrement())
-  sessionId         Int
-  questionId        Int
-  selectedOptionIds Json
-  isCorrect         Boolean @default(false)
-
-  session  GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  question Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
 }
 
 model Product {
@@ -277,8 +232,7 @@ model Product {
   image       String?
   isActive    Boolean @default(true)
 
-  brand      Brand       @relation(fields: [brandId], references: [id], onDelete: Cascade)
-  orderItems OrderItem[]
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
 }
 
 model Order {
@@ -287,9 +241,10 @@ model Order {
   totalCoupons  Int
   status        OrderStatus @default(pending)
   createdAt     DateTime    @default(now())
+  /** [{ productId, quantity, unitCouponPrice }] */
+  items         Json        @default("[]")
 
   participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
-  items       OrderItem[]
 }
 
 enum OrderStatus {
@@ -297,17 +252,6 @@ enum OrderStatus {
   confirmed
   delivered
   cancelled
-}
-
-model OrderItem {
-  id               Int @id @default(autoincrement())
-  orderId          Int
-  productId        Int
-  quantity         Int @default(1)
-  unitCouponPrice  Int
-
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
 }
 
 model Notification {

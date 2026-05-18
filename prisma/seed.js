@@ -1,44 +1,46 @@
 /* eslint-disable no-console */
+/**
+ * Seed léger — démo PFE (mot de passe commun : password123)
+ */
+const path = require("path");
 const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcrypt");
+const { normalizeOptionsPayload } = require(path.join(__dirname, "..", "src", "utils", "questionOptionsJson"));
 
 const prisma = new PrismaClient();
-
-const ROUNDS = 10;
 
 const XP_RANKS = [
   { label: "Débutant", minXp: 0, maxXp: 199, icon: "🌱" },
   { label: "Apprenti", minXp: 200, maxXp: 499, icon: "📘" },
   { label: "Confirmé", minXp: 500, maxXp: 999, icon: "⚡" },
-  { label: "Expert", minXp: 1000, maxXp: 1999, icon: "🔥" },
-  { label: "Maître", minXp: 2000, maxXp: 3999, icon: "💎" },
-  { label: "Mythique", minXp: 4000, maxXp: 99999, icon: "👑" },
+  { label: "Expert", minXp: 1000, maxXp: 99999, icon: "🔥" },
 ];
 
-function buildQuestion(text, xpReward, correctIndex) {
-  const opts = ["Option A", "Option B", "Option C", "Option D"].map((t, i) => ({
-    text: t,
-    isCorrect: i === correctIndex,
-  }));
-  return { text, xpReward, options: { create: opts } };
+function mcq(text, correctIndex = 0) {
+  const labels = ["Réponse A", "Réponse B", "Réponse C"];
+  const opts = labels.map((t, i) => ({ text: t, isCorrect: i === correctIndex }));
+  return { text, xpReward: 10, options: normalizeOptionsPayload(opts) };
 }
 
-async function main() {
+async function wipe() {
   await prisma.notification.deleteMany();
-  await prisma.answer.deleteMany();
-  await prisma.gameSession.deleteMany();
-  await prisma.orderItem.deleteMany();
+  await prisma.quizAttempt.deleteMany();
   await prisma.order.deleteMany();
-  await prisma.option.deleteMany();
   await prisma.question.deleteMany();
+  await prisma.preQuestion.deleteMany();
   await prisma.quiz.deleteMany();
   await prisma.product.deleteMany();
   await prisma.quizmaster.deleteMany();
-  await prisma.brand.deleteMany();
+  await prisma.brandSubscriptionCycle.deleteMany();
   await prisma.participant.deleteMany();
+  await prisma.brand.deleteMany();
   await prisma.admin.deleteMany();
   await prisma.user.deleteMany();
   await prisma.xpRank.deleteMany();
+}
+
+async function main() {
+  await wipe();
 
   for (const r of XP_RANKS) {
     await prisma.xpRank.create({ data: r });
@@ -46,13 +48,12 @@ async function main() {
   const ranks = await prisma.xpRank.findMany({ orderBy: { minXp: "asc" } });
   const rankIdForXp = (xp) => {
     const row = ranks.find((k) => xp >= k.minXp && xp <= k.maxXp);
-    if (!row) return ranks[ranks.length - 1].id;
-    return row.id;
+    return row ? row.id : ranks[ranks.length - 1].id;
   };
 
-  const pass = await bcrypt.hash("password123", ROUNDS);
+  const pass = await bcrypt.hash("password123", 10);
 
-  const adminUser = await prisma.user.create({
+  await prisma.user.create({
     data: {
       email: "admin@acadecom.com",
       password: pass,
@@ -61,71 +62,100 @@ async function main() {
       admin: { create: {} },
     },
   });
-  console.log("Admin:", adminUser.email);
 
-  const b1User = await prisma.user.create({
-    data: {
-      email: "ooredoo@brand.com",
-      password: pass,
-      name: "Ooredoo",
-      role: "brand",
-      brand: { create: { industry: "Telecom", description: "Ooredoo Tunisia" } },
-    },
-    include: { brand: true },
-  });
-  const b2User = await prisma.user.create({
-    data: {
-      email: "orange@brand.com",
-      password: pass,
-      name: "Orange",
-      role: "brand",
-      brand: { create: { industry: "Telecom", description: "Orange Tunisia" } },
-    },
-    include: { brand: true },
-  });
-
-  const brand1 = b1User.brand;
-  const brand2 = b2User.brand;
-
-  const qmDefs = [
-    { name: "Amir", email: "amir@ooredoo.com", brandId: brand1.id },
-    { name: "Sana", email: "sana@ooredoo.com", brandId: brand1.id },
-    { name: "Mehdi", email: "mehdi@orange.com", brandId: brand2.id },
-    { name: "Rania", email: "rania@orange.com", brandId: brand2.id },
+  const brands = [
+    { email: "ooredoo@brand.com", name: "Ooredoo Tunisia", qmEmail: "amir@ooredoo.com", qmName: "Amir" },
+    { email: "orange@brand.com", name: "Orange Tunisia", qmEmail: "mehdi@orange.com", qmName: "Mehdi" },
   ];
 
-  const quizmasters = [];
-  for (const q of qmDefs) {
-    const u = await prisma.user.create({
-      data: {
-        email: q.email,
-        password: pass,
-        name: q.name,
-        role: "quizmaster",
-        quizmaster: { create: { brandId: q.brandId, approvalStatus: "ACTIVE" } },
-      },
-      include: { quizmaster: true },
-    });
-    quizmasters.push(u.quizmaster);
-  }
+  const participants = [
+    { email: "alice@participant.com", name: "Alice", xp: 120, coupons: 25 },
+    { email: "bob@participant.com", name: "Bob", xp: 450, coupons: 8 },
+    { email: "sara@participant.com", name: "Sara", xp: 80, coupons: 15 },
+  ];
 
-  const seedQmProfile = {
+  const qmProfile = {
     phoneE164: "+21670111223",
     gender: "prefer_not",
     birthDate: new Date("1990-01-10"),
     profilePhotoUrl: "https://placehold.co/140x140/png?text=QM",
     isProfileComplete: true,
+    approvalStatus: "ACTIVE",
   };
-  for (const qm of quizmasters) {
-    await prisma.quizmaster.update({ where: { id: qm.id }, data: seedQmProfile });
+
+  const participantProfile = {
+    phoneE164: "+21670111222",
+    gender: "prefer_not",
+    birthDate: new Date("1999-05-20"),
+    country: "Tunisia",
+    city: "Tunis",
+    profilePhotoUrl: "https://placehold.co/140x140/png?text=P",
+    isProfileComplete: true,
+  };
+
+  for (const b of brands) {
+    const brandUser = await prisma.user.create({
+      data: {
+        email: b.email,
+        password: pass,
+        name: b.name,
+        role: "brand",
+        brand: {
+          create: {
+            industry: "Telecom",
+            description: b.name,
+            planType: "FREE",
+            subscriptionStatus: "ACTIVE",
+          },
+        },
+      },
+      include: { brand: true },
+    });
+
+    const qmUser = await prisma.user.create({
+      data: {
+        email: b.qmEmail,
+        password: pass,
+        name: b.qmName,
+        role: "quizmaster",
+        quizmaster: { create: { brandId: brandUser.brand.id, ...qmProfile } },
+      },
+      include: { quizmaster: true },
+    });
+
+    await prisma.product.create({
+      data: {
+        brandId: brandUser.brand.id,
+        name: b.email.startsWith("ooredoo") ? "Recharge 5DT" : "Data Pack 1GB",
+        description: "Produit démo boutique coupons.",
+        couponPrice: 10,
+        stock: 50,
+        isActive: true,
+      },
+    });
+
+    await prisma.quiz.create({
+      data: {
+        brandId: brandUser.brand.id,
+        quizmasterId: qmUser.quizmaster.id,
+        title: `Quiz télécom — ${b.name}`,
+        category: "Telecom",
+        maxCoupons: 10,
+        isActive: true,
+        durationSeconds: 300,
+        passingScore: 0.5,
+        questions: {
+          create: [
+            mcq("Que signifie 4G ?", 0),
+            mcq("Un forfait prépayé permet de…", 0),
+            mcq("Le Mbps mesure…", 0),
+          ],
+        },
+      },
+    });
   }
 
-  const participantsData = [
-    { name: "Alice", email: "alice@participant.com", xp: 350, coupons: 20 },
-    { name: "Bob", email: "bob@participant.com", xp: 820, coupons: 5 },
-    { name: "Sara", email: "sara@participant.com", xp: 50, coupons: 30 },
-  ];
-  for (const p of participantsData) {
+  for (const p of participants) {
     await prisma.user.create({
       data: {
         email: p.email,
@@ -138,95 +168,14 @@ async function main() {
             coupons: p.coupons,
             totalPoints: p.xp,
             xpRankId: rankIdForXp(p.xp),
+            ...participantProfile,
           },
         },
       },
     });
   }
 
-  const seedParticipantsProfile = {
-    phoneE164: "+21670111222",
-    gender: "prefer_not",
-    birthDate: new Date("1999-05-20"),
-    country: "Tunisia",
-    city: "Tunis",
-    profilePhotoUrl: "https://placehold.co/140x140/png?text=P",
-    isProfileComplete: true,
-  };
-  for (const em of participantsData.map((x) => x.email)) {
-    const uRow = await prisma.user.findUnique({ where: { email: em }, select: { id: true } });
-    await prisma.participant.update({
-      where: { userId: uRow.id },
-      data: seedParticipantsProfile,
-    });
-  }
-
-  await prisma.product.createMany({
-    data: [
-      {
-        brandId: brand1.id,
-        name: "Recharge 5DT",
-        description: "Crédit téléphonique utilisable par votre ligne.",
-        couponPrice: 10,
-        stock: 50,
-      },
-      {
-        brandId: brand1.id,
-        name: "Recharge 10DT",
-        description: "Pack recharge valeur 10 dinars.",
-        couponPrice: 18,
-        stock: 30,
-      },
-      {
-        brandId: brand2.id,
-        name: "Data Pack 1GB",
-        description: "Internet mobile valable selon conditions opérateur.",
-        couponPrice: 12,
-        stock: 40,
-      },
-      {
-        brandId: brand2.id,
-        name: "Forfait Appel",
-        description: "Minutes d’appels selon grille promotionnelle.",
-        couponPrice: 15,
-        stock: 25,
-      },
-    ],
-  });
-
-  let qc = 0;
-  const xpRewards = [15, 18, 22, 28];
-  for (const qm of quizmasters) {
-    for (let n = 1; n <= 2; n += 1) {
-      qc += 1;
-      const maxCoupons = 10 + (qc % 11);
-      const questions = [];
-      for (let i = 0; i < 4; i += 1) {
-        questions.push(
-          buildQuestion(
-            `Q${qc}-${i + 1}: Question pour ${qm.id} partie ${n}`,
-            xpRewards[i],
-            i % 4
-          )
-        );
-      }
-      await prisma.quiz.create({
-        data: {
-          brandId: qm.brandId,
-          quizmasterId: qm.id,
-          title: `Quiz ${n} · QM ${qm.id}`,
-          category: qc % 2 === 0 ? "Général" : "Télécom",
-          maxCoupons,
-          isActive: true,
-          durationSeconds: 300,
-          passingScore: 0.6,
-          questions: { create: questions },
-        },
-      });
-    }
-  }
-
-  console.log("Seed OK — admin quizmasters quizzes products participants");
+  console.log("Seed OK — 1 admin, 2 marques, 2 quizmasters, 2 quiz, 2 produits, 3 participants (password123)");
 }
 
 main()

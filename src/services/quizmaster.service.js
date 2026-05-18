@@ -1,6 +1,15 @@
 const prisma = require("../prisma/client");
 const ApiError = require("../utils/ApiError");
 const BrandPlanService = require("./brandPlan.service");
+const {
+  hydrateQuizQuestions,
+  hydrateQuestion,
+  normalizeOptionsPayload,
+} = require("../utils/questionOptionsJson");
+
+function hydrateQuiz(quiz) {
+  return quiz ? hydrateQuizQuestions(quiz) : quiz;
+}
 
 function validateQuestionOptions(options, label = "Question") {
   if (!Array.isArray(options) || options.length < 2) {
@@ -73,12 +82,12 @@ async function getQuiz(userId, quizId) {
   const quiz = await prisma.quiz.findFirst({
     where: { id: quizId, quizmasterId: qm.id },
     include: {
-      questions: { orderBy: { id: "asc" }, include: { options: true } },
+      questions: { orderBy: { id: "asc" } },
       preQuestions: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
     },
   });
   if (!quiz) throw new ApiError(404, "Quiz introuvable");
-  return quiz;
+  return hydrateQuiz(quiz);
 }
 
 async function createQuiz(userId, body) {
@@ -117,12 +126,7 @@ async function createQuiz(userId, body) {
         text: q.text,
         xpReward: Number(q.xpReward ?? 10),
         hint: q.hint ?? null,
-        options: {
-          create: (q.options || []).map((o) => ({
-            text: String(o.text).trim(),
-            isCorrect: Boolean(o.isCorrect),
-          })),
-        },
+        options: normalizeOptionsPayload(q.options || []),
       })),
     };
   }
@@ -147,7 +151,7 @@ async function createQuiz(userId, body) {
     };
   }
 
-  return prisma.quiz.create({
+  const row = await prisma.quiz.create({
     data: {
       brandId: qm.brandId,
       quizmasterId: qm.id,
@@ -163,10 +167,11 @@ async function createQuiz(userId, body) {
       preQuestions: preCreate,
     },
     include: {
-      questions: { orderBy: { id: "asc" }, include: { options: true } },
+      questions: { orderBy: { id: "asc" } },
       preQuestions: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
     },
   });
+  return hydrateQuiz(row);
 }
 
 async function updateQuiz(userId, quizId, body) {
@@ -203,14 +208,15 @@ async function updateQuiz(userId, quizId, body) {
   const touchesPre = body.preQuestions !== undefined || body.hasPreQuestions !== undefined;
 
   if (!touchesPre) {
-    return prisma.quiz.update({
+    const row = await prisma.quiz.update({
       where: { id: quizId },
       data,
       include: {
-        questions: { orderBy: { id: "asc" }, include: { options: true } },
+        questions: { orderBy: { id: "asc" } },
         preQuestions: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       },
     });
+    return hydrateQuiz(row);
   }
 
   return prisma.$transaction(async (tx) => {
@@ -268,13 +274,14 @@ async function updateQuiz(userId, quizId, body) {
       }
     }
 
-    return tx.quiz.findFirst({
+    const row = await tx.quiz.findFirst({
       where: { id: quizId },
       include: {
-        questions: { orderBy: { id: "asc" }, include: { options: true } },
+        questions: { orderBy: { id: "asc" } },
         preQuestions: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       },
     });
+    return hydrateQuiz(row);
   });
 }
 
@@ -290,21 +297,16 @@ async function addQuestion(userId, quizId, body) {
 
   validateQuestionOptions(body.options || [], "Question");
 
-  return prisma.question.create({
+  const row = await prisma.question.create({
     data: {
       quizId,
       text: body.text,
       xpReward: Number(body.xpReward ?? 10),
       hint: body.hint ?? null,
-      options: {
-        create: (body.options || []).map((o) => ({
-          text: String(o.text).trim(),
-          isCorrect: Boolean(o.isCorrect),
-        })),
-      },
+      options: normalizeOptionsPayload(body.options || []),
     },
-    include: { options: true },
   });
+  return hydrateQuestion(row);
 }
 
 async function updateQuestion(userId, questionId, body) {
@@ -313,23 +315,16 @@ async function updateQuestion(userId, questionId, body) {
 
   validateQuestionOptions(body.options || [], "Question");
 
-  await prisma.option.deleteMany({ where: { questionId } });
-
-  return prisma.question.update({
+  const row = await prisma.question.update({
     where: { id: questionId },
     data: {
       text: body.text,
       xpReward: Number(body.xpReward ?? 10),
       hint: body.hint ?? null,
-      options: {
-        create: (body.options || []).map((o) => ({
-          text: String(o.text).trim(),
-          isCorrect: Boolean(o.isCorrect),
-        })),
-      },
+      options: normalizeOptionsPayload(body.options || []),
     },
-    include: { options: true },
   });
+  return hydrateQuestion(row);
 }
 
 async function deleteQuestion(userId, questionId) {

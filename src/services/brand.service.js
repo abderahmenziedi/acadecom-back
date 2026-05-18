@@ -200,13 +200,28 @@ async function deleteQuizmaster(brandUserId, quizmasterId) {
 
 async function listQuizzes(brandUserId) {
   const brand = await resolveBrand(brandUserId);
-  return prisma.quiz.findMany({
+  const rows = await prisma.quiz.findMany({
     where: { brandId: brand.id },
     orderBy: { id: "desc" },
     include: {
       quizmaster: { include: { user: { select: { name: true, email: true } } } },
-      _count: { select: { questions: true, sessions: true } },
+      _count: {
+        select: {
+          questions: true,
+          quizAttempts: { where: { completedAt: { not: null } } },
+        },
+      },
     },
+  });
+  return rows.map((row) => {
+    const { _count, ...rest } = row;
+    return {
+      ...rest,
+      _count: {
+        questions: _count.questions,
+        sessions: _count.quizAttempts,
+      },
+    };
   });
 }
 

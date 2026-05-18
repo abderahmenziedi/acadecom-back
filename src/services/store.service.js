@@ -1,6 +1,50 @@
 const prisma = require("../prisma/client");
 const ApiError = require("../utils/ApiError");
 
+function parseOrderItemsJson(items) {
+  if (items == null) return [];
+  if (Array.isArray(items)) return items;
+  if (typeof items === "string") {
+    try {
+      const parsed = JSON.parse(items);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+async function hydrateOrder(order) {
+  const lines = parseOrderItemsJson(order.items);
+  if (!lines.length) return { ...order, items: [] };
+
+  const ids = [
+    ...new Set(lines.map((l) => Number(l.productId)).filter((n) => Number.isInteger(n) && n > 0)),
+  ];
+  const products = await prisma.product.findMany({
+    where: { id: { in: ids } },
+    include: {
+      brand: {
+        include: { user: { select: { name: true } } },
+      },
+    },
+  });
+  const byId = new Map(products.map((prod) => [prod.id, prod]));
+
+  /** @type {{ items?: unknown }} */
+  const { items: _drop, ...rest } = order;
+  return {
+    ...rest,
+    items: lines.map((line) => ({
+      productId: Number(line.productId),
+      quantity: Number(line.quantity) || 0,
+      unitCouponPrice: Number(line.unitCouponPrice) || 0,
+      product: byId.get(Number(line.productId)) ?? null,
+    })),
+  };
+}
+
 async function listProducts(filters = {}) {
   const page = Number(filters.page) || 1;
   const limit = Number(filters.limit) || 24;
@@ -54,6 +98,7 @@ async function placeOrder(participantDbId, userId, items) {
   for (const line of items) {
     const product = await prisma.product.findUnique({
       where: { id: Number(line.productId) },
+      include: { brand: { select: { userId: true } } },
     });
     if (!product?.isActive) throw new ApiError(400, `Produit ${line.productId} indisponible`);
     const qty = Math.max(1, Number(line.quantity) || 1);
@@ -80,28 +125,29 @@ async function placeOrder(participantDbId, userId, items) {
       data: { coupons: { decrement: totalCoupons } },
     });
 
-    const order = await tx.order.create({
+    const itemsPayload = lines.map((l) => ({
+      productId: l.product.id,
+      quantity: l.qty,
+      unitCouponPrice: l.unitCouponPrice,
+    }));
+
+    const orderRow = await tx.order.create({
       data: {
         participantId: participantDbId,
         totalCoupons,
-        items: {
-          create: lines.map((l) => ({
-            productId: l.product.id,
-            quantity: l.qty,
-            unitCouponPrice: l.unitCouponPrice,
-          })),
-        },
-      },
-      include: {
-        items: {
-          include: {
-            product: {
-              include: { brand: { select: { userId: true } } },
-            },
-          },
-        },
+        items: itemsPayload,
       },
     });
+
+    const order = {
+      ...orderRow,
+      items: lines.map((l) => ({
+        productId: l.product.id,
+        quantity: l.qty,
+        unitCouponPrice: l.unitCouponPrice,
+        product: l.product,
+      })),
+    };
 
     await tx.notification.create({
       data: {
@@ -133,40 +179,19 @@ async function placeOrder(participantDbId, userId, items) {
 }
 
 async function listOrders(participantDbId) {
-  return prisma.order.findMany({
+  const rows = await prisma.order.findMany({
     where: { participantId: participantDbId },
     orderBy: { id: "desc" },
-    include: {
-      items: {
-        include: {
-          product: {
-            include: {
-              brand: { include: { user: { select: { name: true } } } },
-            },
-          },
-        },
-      },
-    },
   });
+  return Promise.all(rows.map(hydrateOrder));
 }
 
 async function getOrder(participantDbId, orderId) {
   const o = await prisma.order.findFirst({
     where: { id: Number(orderId), participantId: participantDbId },
-    include: {
-      items: {
-        include: {
-          product: {
-            include: {
-              brand: { include: { user: { select: { name: true } } } },
-            },
-          },
-        },
-      },
-    },
   });
   if (!o) throw new ApiError(404, "Commande introuvable");
-  return o;
+  return hydrateOrder(o);
 }
 
 module.exports = {

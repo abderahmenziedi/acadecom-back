@@ -1,5 +1,6 @@
 const prisma = require("../prisma/client");
 const ApiError = require("../utils/ApiError");
+const { hydrateQuizQuestions } = require("../utils/questionOptionsJson");
 
 function normalizeAnswerEntry(raw) {
   const qid = Number(raw?.questionId);
@@ -39,26 +40,30 @@ function setsEqual(setA, setB) {
  * XP : par question, sans mauvaise réponse cochée : xpReward × (bonnes réponses cochées / nombre de bonnes réponses attendues).
  */
 async function playQuiz(participantDbId, quizId, answersPayload, durationSeconds = 0) {
-  const existing = await prisma.gameSession.findUnique({
-    where: { participantId_quizId: { participantId: participantDbId, quizId } },
+  const existing = await prisma.quizAttempt.findFirst({
+    where: {
+      participantId: participantDbId,
+      quizId,
+      completedAt: { not: null },
+    },
   });
   if (existing) throw new ApiError(409, "Quiz déjà joué");
 
-  const quiz = await prisma.quiz.findUnique({
+  const quizRaw = await prisma.quiz.findUnique({
     where: { id: quizId },
     include: {
       brand: { select: { userId: true } },
       preQuestions: { select: { id: true } },
       questions: {
         orderBy: { id: "asc" },
-        include: { options: true },
       },
     },
   });
+  const quiz = quizRaw ? hydrateQuizQuestions(quizRaw) : null;
   if (!quiz) throw new ApiError(404, "Quiz introuvable");
   if (!quiz.isActive) throw new ApiError(400, "Quiz inactif");
 
-  const attempt = await prisma.participantQuizAttempt.findUnique({
+  const attempt = await prisma.quizAttempt.findUnique({
     where: { participantId_quizId: { participantId: participantDbId, quizId } },
   });
   if (!attempt) {
@@ -67,6 +72,11 @@ async function playQuiz(participantDbId, quizId, answersPayload, durationSeconds
       "Démarrez le quiz depuis le catalogue avant de soumettre vos réponses.",
     );
   }
+  if (attempt.completedAt) {
+    throw new ApiError(409, "Quiz déjà joué");
+  }
+
+  const attemptId = attempt.id;
 
   const { participantHasCompletedPreQuestions } = require("./participant.service");
   if (
@@ -150,28 +160,18 @@ async function playQuiz(participantDbId, quizId, answersPayload, durationSeconds
   const couponsEarned = passed ? quiz.maxCoupons : 0;
 
   const session = await prisma.$transaction(async (tx) => {
-    const sess = await tx.gameSession.create({
+    const sess = await tx.quizAttempt.update({
+      where: { id: attemptId },
       data: {
-        participantId: participantDbId,
-        quizId,
+        completedAt: new Date(),
         scorePercent: scoreFraction,
         xpEarned,
         couponsEarned,
         passed,
         durationSeconds: durationSeconds ?? 0,
+        responses: answersToStore,
       },
     });
-
-    for (const a of answersToStore) {
-      await tx.answer.create({
-        data: {
-          sessionId: sess.id,
-          questionId: a.questionId,
-          selectedOptionIds: a.selectedOptionIds,
-          isCorrect: a.isCorrect,
-        },
-      });
-    }
 
     const updated = await tx.participant.update({
       where: { id: participantDbId },
@@ -230,7 +230,7 @@ async function playQuiz(participantDbId, quizId, answersPayload, durationSeconds
       }
     }
 
-    return { sess: { ...sess, scorePercent: scoreFraction }, rank };
+    return { sess: { ...sess, scorePercent: scoreFraction, playedAt: sess.completedAt }, rank };
   });
 
   return {

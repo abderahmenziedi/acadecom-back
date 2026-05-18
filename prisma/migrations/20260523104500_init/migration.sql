@@ -29,8 +29,32 @@ CREATE TABLE `Brand` (
     `industry` VARCHAR(191) NULL,
     `description` VARCHAR(191) NULL,
     `logoUrl` VARCHAR(191) NULL,
+    `planType` ENUM('FREE', 'PRO', 'PRO_PLUS') NOT NULL DEFAULT 'FREE',
+    `subscriptionStatus` ENUM('ACTIVE', 'PENDING_PAYMENT', 'EXPIRED') NOT NULL DEFAULT 'ACTIVE',
+    `stripeCustomerId` VARCHAR(191) NULL,
 
     UNIQUE INDEX `Brand_userId_key`(`userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `brand_subscriptions` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `brandId` INTEGER NOT NULL,
+    `planType` ENUM('FREE', 'PRO', 'PRO_PLUS') NOT NULL,
+    `lifecycle` ENUM('ACTIVE', 'EXPIRED', 'SUPERSEDED') NOT NULL DEFAULT 'ACTIVE',
+    `paymentDate` DATETIME(3) NOT NULL,
+    `startDate` DATETIME(3) NOT NULL,
+    `endDate` DATETIME(3) NOT NULL,
+    `amountMinor` INTEGER NOT NULL DEFAULT 0,
+    `currency` VARCHAR(191) NOT NULL DEFAULT 'tnd',
+    `stripeCheckoutSessionId` VARCHAR(191) NULL,
+    `stripePaymentIntentId` VARCHAR(191) NULL,
+    `expiryWarnedAt` DATETIME(3) NULL,
+
+    UNIQUE INDEX `brand_subscriptions_stripeCheckoutSessionId_key`(`stripeCheckoutSessionId`),
+    INDEX `brand_subscriptions_brandId_idx`(`brandId`),
+    INDEX `brand_subscriptions_brandId_lifecycle_idx`(`brandId`, `lifecycle`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -39,8 +63,15 @@ CREATE TABLE `Quizmaster` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `userId` INTEGER NOT NULL,
     `brandId` INTEGER NOT NULL,
+    `approvalStatus` ENUM('PENDING', 'ACTIVE', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+    `phoneE164` VARCHAR(191) NULL,
+    `gender` VARCHAR(191) NULL,
+    `birthDate` DATE NULL,
+    `profilePhotoUrl` VARCHAR(191) NULL,
+    `isProfileComplete` BOOLEAN NOT NULL DEFAULT false,
 
     UNIQUE INDEX `Quizmaster_userId_key`(`userId`),
+    INDEX `Quizmaster_brandId_approvalStatus_idx`(`brandId`, `approvalStatus`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -52,6 +83,14 @@ CREATE TABLE `Participant` (
     `coupons` INTEGER NOT NULL DEFAULT 0,
     `totalPoints` INTEGER NOT NULL DEFAULT 0,
     `xpRankId` INTEGER NOT NULL DEFAULT 1,
+    `phoneE164` VARCHAR(191) NULL,
+    `gender` VARCHAR(191) NULL,
+    `birthDate` DATE NULL,
+    `country` VARCHAR(191) NULL,
+    `city` VARCHAR(191) NULL,
+    `profilePhotoUrl` VARCHAR(191) NULL,
+    `isProfileComplete` BOOLEAN NOT NULL DEFAULT false,
+    `preAnswersJson` JSON NOT NULL,
 
     UNIQUE INDEX `Participant_userId_key`(`userId`),
     PRIMARY KEY (`id`)
@@ -80,8 +119,41 @@ CREATE TABLE `Quiz` (
     `isActive` BOOLEAN NOT NULL DEFAULT false,
     `durationSeconds` INTEGER NOT NULL DEFAULT 300,
     `passingScore` DOUBLE NOT NULL DEFAULT 0.5,
+    `randomizeQuestions` BOOLEAN NOT NULL DEFAULT false,
+    `shuffleOptions` BOOLEAN NOT NULL DEFAULT false,
+    `hasPreQuestions` BOOLEAN NOT NULL DEFAULT false,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `QuizAttempt` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `participantId` INTEGER NOT NULL,
+    `quizId` INTEGER NOT NULL,
+    `reservedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `completedAt` DATETIME(3) NULL,
+    `scorePercent` DOUBLE NOT NULL DEFAULT 0,
+    `xpEarned` INTEGER NOT NULL DEFAULT 0,
+    `couponsEarned` INTEGER NOT NULL DEFAULT 0,
+    `passed` BOOLEAN NOT NULL DEFAULT false,
+    `durationSeconds` INTEGER NOT NULL DEFAULT 0,
+    `responses` JSON NULL,
+
+    INDEX `QuizAttempt_quizId_idx`(`quizId`),
+    UNIQUE INDEX `QuizAttempt_participantId_quizId_key`(`participantId`, `quizId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PreQuestion` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `quizId` INTEGER NOT NULL,
+    `questionText` TEXT NOT NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+
+    INDEX `PreQuestion_quizId_idx`(`quizId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -91,45 +163,8 @@ CREATE TABLE `Question` (
     `quizId` INTEGER NOT NULL,
     `text` TEXT NOT NULL,
     `xpReward` INTEGER NOT NULL DEFAULT 10,
-    `orderIndex` INTEGER NOT NULL DEFAULT 0,
     `hint` VARCHAR(191) NULL,
-
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `Option` (
-    `id` INTEGER NOT NULL AUTO_INCREMENT,
-    `questionId` INTEGER NOT NULL,
-    `text` VARCHAR(500) NOT NULL,
-    `isCorrect` BOOLEAN NOT NULL DEFAULT false,
-
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `GameSession` (
-    `id` INTEGER NOT NULL AUTO_INCREMENT,
-    `participantId` INTEGER NOT NULL,
-    `quizId` INTEGER NOT NULL,
-    `scorePercent` DOUBLE NOT NULL DEFAULT 0,
-    `xpEarned` INTEGER NOT NULL DEFAULT 0,
-    `couponsEarned` INTEGER NOT NULL DEFAULT 0,
-    `passed` BOOLEAN NOT NULL DEFAULT false,
-    `durationSeconds` INTEGER NOT NULL DEFAULT 0,
-    `playedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-
-    UNIQUE INDEX `GameSession_participantId_quizId_key`(`participantId`, `quizId`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `Answer` (
-    `id` INTEGER NOT NULL AUTO_INCREMENT,
-    `sessionId` INTEGER NOT NULL,
-    `questionId` INTEGER NOT NULL,
-    `selectedOptionId` INTEGER NOT NULL,
-    `isCorrect` BOOLEAN NOT NULL DEFAULT false,
+    `options` JSON NOT NULL,
 
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -139,6 +174,7 @@ CREATE TABLE `Product` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `brandId` INTEGER NOT NULL,
     `name` VARCHAR(191) NOT NULL,
+    `description` TEXT NULL,
     `couponPrice` INTEGER NOT NULL,
     `stock` INTEGER NOT NULL DEFAULT 0,
     `image` VARCHAR(191) NULL,
@@ -154,17 +190,7 @@ CREATE TABLE `Order` (
     `totalCoupons` INTEGER NOT NULL,
     `status` ENUM('pending', 'confirmed', 'delivered', 'cancelled') NOT NULL DEFAULT 'pending',
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `OrderItem` (
-    `id` INTEGER NOT NULL AUTO_INCREMENT,
-    `orderId` INTEGER NOT NULL,
-    `productId` INTEGER NOT NULL,
-    `quantity` INTEGER NOT NULL DEFAULT 1,
-    `unitCouponPrice` INTEGER NOT NULL,
+    `items` JSON NOT NULL,
 
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -188,6 +214,9 @@ ALTER TABLE `Admin` ADD CONSTRAINT `Admin_userId_fkey` FOREIGN KEY (`userId`) RE
 ALTER TABLE `Brand` ADD CONSTRAINT `Brand_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `brand_subscriptions` ADD CONSTRAINT `brand_subscriptions_brandId_fkey` FOREIGN KEY (`brandId`) REFERENCES `Brand`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `Quizmaster` ADD CONSTRAINT `Quizmaster_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -206,25 +235,16 @@ ALTER TABLE `Quiz` ADD CONSTRAINT `Quiz_brandId_fkey` FOREIGN KEY (`brandId`) RE
 ALTER TABLE `Quiz` ADD CONSTRAINT `Quiz_quizmasterId_fkey` FOREIGN KEY (`quizmasterId`) REFERENCES `Quizmaster`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `QuizAttempt` ADD CONSTRAINT `QuizAttempt_participantId_fkey` FOREIGN KEY (`participantId`) REFERENCES `Participant`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `QuizAttempt` ADD CONSTRAINT `QuizAttempt_quizId_fkey` FOREIGN KEY (`quizId`) REFERENCES `Quiz`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PreQuestion` ADD CONSTRAINT `PreQuestion_quizId_fkey` FOREIGN KEY (`quizId`) REFERENCES `Quiz`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `Question` ADD CONSTRAINT `Question_quizId_fkey` FOREIGN KEY (`quizId`) REFERENCES `Quiz`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE `Option` ADD CONSTRAINT `Option_questionId_fkey` FOREIGN KEY (`questionId`) REFERENCES `Question`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE `GameSession` ADD CONSTRAINT `GameSession_participantId_fkey` FOREIGN KEY (`participantId`) REFERENCES `Participant`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE `GameSession` ADD CONSTRAINT `GameSession_quizId_fkey` FOREIGN KEY (`quizId`) REFERENCES `Quiz`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE `Answer` ADD CONSTRAINT `Answer_sessionId_fkey` FOREIGN KEY (`sessionId`) REFERENCES `GameSession`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE `Answer` ADD CONSTRAINT `Answer_questionId_fkey` FOREIGN KEY (`questionId`) REFERENCES `Question`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE `Answer` ADD CONSTRAINT `Answer_selectedOptionId_fkey` FOREIGN KEY (`selectedOptionId`) REFERENCES `Option`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `Product` ADD CONSTRAINT `Product_brandId_fkey` FOREIGN KEY (`brandId`) REFERENCES `Brand`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -233,11 +253,4 @@ ALTER TABLE `Product` ADD CONSTRAINT `Product_brandId_fkey` FOREIGN KEY (`brandI
 ALTER TABLE `Order` ADD CONSTRAINT `Order_participantId_fkey` FOREIGN KEY (`participantId`) REFERENCES `Participant`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `OrderItem` ADD CONSTRAINT `OrderItem_orderId_fkey` FOREIGN KEY (`orderId`) REFERENCES `Order`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE `OrderItem` ADD CONSTRAINT `OrderItem_productId_fkey` FOREIGN KEY (`productId`) REFERENCES `Product`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE `Notification` ADD CONSTRAINT `Notification_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
