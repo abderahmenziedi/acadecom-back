@@ -1,39 +1,26 @@
 const NotificationService = require("../services/notification.service");
-const ApiError = require("../utils/ApiError");
+const asyncHandler = require("../utils/asyncHandler");
 
-const NotificationController = {
-  async getNotifications(req, res, next) {
-    try {
-      const page = parseInt(req.query.page, 10) || 1;
-      const limit = parseInt(req.query.limit, 10) || 20;
-      const unreadOnly = req.query.unreadOnly === "true";
-      const data = await NotificationService.getNotifications(req.user.id, { page, limit, unreadOnly });
-      res.json({ status: "success", data });
-    } catch (err) { next(err); }
-  },
+const list = asyncHandler(async (req, res) => {
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 30;
+  const data = await NotificationService.listForUser(req.user.id, page, limit);
+  res.json({ status: "success", data });
+});
 
-  async getUnreadCount(req, res, next) {
-    try {
-      const count = await NotificationService.getUnreadCount(req.user.id);
-      res.json({ status: "success", data: { count } });
-    } catch (err) { next(err); }
-  },
+const unreadCount = asyncHandler(async (req, res) => {
+  const count = await NotificationService.unreadCount(req.user.id);
+  res.json({ status: "success", data: { count } });
+});
 
-  async markAsRead(req, res, next) {
-    try {
-      const id = parseInt(req.params.id, 10);
-      if (!id) throw new ApiError(400, "ID notification invalide");
-      await NotificationService.markAsRead(id, req.user.id);
-      res.json({ status: "success", message: "Notification marquée comme lue" });
-    } catch (err) { next(err); }
-  },
+const markOne = asyncHandler(async (req, res) => {
+  await NotificationService.markRead(req.user.id, Number(req.params.id));
+  res.json({ status: "success" });
+});
 
-  async markAllAsRead(req, res, next) {
-    try {
-      await NotificationService.markAllAsRead(req.user.id);
-      res.json({ status: "success", message: "Toutes les notifications marquées comme lues" });
-    } catch (err) { next(err); }
-  },
-};
+const markAll = asyncHandler(async (req, res) => {
+  await NotificationService.markAllRead(req.user.id);
+  res.json({ status: "success" });
+});
 
-module.exports = NotificationController;
+module.exports = { list, unreadCount, markOne, markAll };

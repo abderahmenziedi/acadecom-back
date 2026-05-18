@@ -1,123 +1,53 @@
 const QuizmasterService = require("../services/quizmaster.service");
-const { quizmasterIdParamSchema, getQuizmastersQuerySchema } = require("../validations/quizmaster.validation");
-const ApiError = require("../utils/ApiError");
+const asyncHandler = require("../utils/asyncHandler");
 
-/**
- * Parse et valide l'ID du paramètre d'URL.
- */
-function parseQuizmasterId(params) {
-    const result = quizmasterIdParamSchema.safeParse(params);
-    if (!result.success) {
-        const fieldErrors = result.error.flatten().fieldErrors;
-        throw new ApiError(400, fieldErrors.id?.[0] || "ID quizmaster invalide");
-    }
-    return result.data.id;
-}
+const list = asyncHandler(async (req, res) => {
+  const data = await QuizmasterService.listQuizzes(req.user.id);
+  res.json({ status: "success", data });
+});
 
-/**
- * QuizmasterController — Couche contrôleur pour la gestion des quizmasters par l'admin.
- */
-const QuizmasterController = {
-    /**
-     * POST /api/v1/admin/quizmasters
-     * Crée un nouveau quizmaster (lié à un brand).
-     */
-    async create(req, res, next) {
-        try {
-            const quizmaster = await QuizmasterService.create(req.body);
-            res.status(201).json({
-                status: "success",
-                message: "Quizmaster créé avec succès",
-                data: { quizmaster },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const getOne = asyncHandler(async (req, res) => {
+  const data = await QuizmasterService.getQuiz(req.user.id, Number(req.params.id));
+  res.json({ status: "success", data });
+});
 
-    /**
-     * GET /api/v1/admin/quizmasters
-     * Liste tous les quizmasters avec pagination et filtre optionnel par brandId.
-     */
-    async getAll(req, res, next) {
-        try {
-            const result = getQuizmastersQuerySchema.safeParse(req.query);
-            if (!result.success) {
-                const fieldErrors = result.error.flatten().fieldErrors;
-                const messages = Object.entries(fieldErrors)
-                    .map(([field, errors]) => `${field}: ${errors[0]}`)
-                    .join("; ");
-                return next(new ApiError(400, messages || "Paramètres invalides"));
-            }
+const create = asyncHandler(async (req, res) => {
+  const data = await QuizmasterService.createQuiz(req.user.id, req.body);
+  res.status(201).json({ status: "success", data });
+});
 
-            const { brandId, page, limit } = result.data;
-            const data = await QuizmasterService.getAll({ brandId, page, limit });
+const update = asyncHandler(async (req, res) => {
+  const data = await QuizmasterService.updateQuiz(req.user.id, Number(req.params.id), req.body);
+  res.json({ status: "success", data });
+});
 
-            res.status(200).json({
-                status: "success",
-                message: `${data.total} quizmaster(s) trouvé(s)`,
-                data,
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const remove = asyncHandler(async (req, res) => {
+  await QuizmasterService.deleteQuiz(req.user.id, Number(req.params.id));
+  res.json({ status: "success" });
+});
 
-    /**
-     * GET /api/v1/admin/quizmasters/:id
-     * Récupère un quizmaster par son ID.
-     */
-    async getById(req, res, next) {
-        try {
-            const id = parseQuizmasterId(req.params);
-            const quizmaster = await QuizmasterService.getById(id);
+const addQuestion = asyncHandler(async (req, res) => {
+  const data = await QuizmasterService.addQuestion(req.user.id, Number(req.params.quizId), req.body);
+  res.status(201).json({ status: "success", data });
+});
 
-            res.status(200).json({
-                status: "success",
-                data: { quizmaster },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const updateQuestion = asyncHandler(async (req, res) => {
+  const data = await QuizmasterService.updateQuestion(req.user.id, Number(req.params.questionId), req.body);
+  res.json({ status: "success", data });
+});
 
-    /**
-     * PUT /api/v1/admin/quizmasters/:id
-     * Met à jour un quizmaster existant.
-     */
-    async update(req, res, next) {
-        try {
-            const id = parseQuizmasterId(req.params);
-            const quizmaster = await QuizmasterService.update(id, req.body);
+const deleteQuestion = asyncHandler(async (req, res) => {
+  await QuizmasterService.deleteQuestion(req.user.id, Number(req.params.questionId));
+  res.json({ status: "success" });
+});
 
-            res.status(200).json({
-                status: "success",
-                message: "Quizmaster mis à jour avec succès",
-                data: { quizmaster },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
-
-    /**
-     * DELETE /api/v1/admin/quizmasters/:id
-     * Supprime un quizmaster.
-     */
-    async delete(req, res, next) {
-        try {
-            const id = parseQuizmasterId(req.params);
-            const deleted = await QuizmasterService.delete(id);
-
-            res.status(200).json({
-                status: "success",
-                message: `Quizmaster ${deleted.email} supprimé avec succès`,
-                data: { id: deleted.id },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+module.exports = {
+  list,
+  getOne,
+  create,
+  update,
+  remove,
+  addQuestion,
+  updateQuestion,
+  deleteQuestion,
 };
-
-module.exports = QuizmasterController;

@@ -1,198 +1,351 @@
-const prisma = require("../config/prisma");
-const bcrypt = require("bcrypt");
+const prisma = require("../prisma/client");
 const ApiError = require("../utils/ApiError");
+const BrandPlanService = require("./brandPlan.service");
 
-/**
- * Champs retournés pour un quizmaster (jamais le mot de passe).
- */
-const quizmasterSelect = {
-    id: true,
-    name: true,
-    email: true,
-    role: true,
-    isBlocked: true,
-    brandId: true,
-    brand: { select: { id: true, name: true, email: true } },
-    createdAt: true,
+function validateQuestionOptions(options, label = "Question") {
+  if (!Array.isArray(options) || options.length < 2) {
+    throw new ApiError(400, `${label}: au moins 2 réponses possibles sont requises`);
+  }
+  let correct = 0;
+  for (const o of options) {
+    if (!o || typeof o.text !== "string" || !String(o.text).trim()) {
+      throw new ApiError(400, `${label}: chaque réponse doit avoir un texte`);
+    }
+    if (o.isCorrect) correct += 1;
+  }
+  if (correct < 1) {
+    throw new ApiError(400, `${label}: cochez au moins une bonne réponse`);
+  }
+}
+
+function clampPassingScore(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0.5;
+  return Math.min(1, Math.max(0, n));
+}
+
+function clampDurationSeconds(v) {
+  const n = Number.parseInt(String(v), 10);
+  if (!Number.isInteger(n) || n < 1) return 300;
+  return Math.min(86400, n);
+}
+
+function clampMaxCoupons(v) {
+  const n = Number.parseInt(String(v), 10);
+  if (!Number.isInteger(n) || n < 0) return 0;
+  return Math.min(10000, n);
+}
+
+async function resolveQuizmaster(userId) {
+  const qm = await prisma.quizmaster.findUnique({ where: { userId } });
+  if (!qm) throw new ApiError(403, "Compte quizmaster introuvable");
+  return qm;
+}
+
+async function assertOwnQuiz(quizmasterId, quizId) {
+  const quiz = await prisma.quiz.findFirst({
+    where: { id: quizId, quizmasterId },
+  });
+  if (!quiz) throw new ApiError(404, "Quiz introuvable");
+  return quiz;
+}
+
+async function assertOwnQuestion(quizmasterId, questionId) {
+  const q = await prisma.question.findUnique({
+    where: { id: questionId },
+    include: { quiz: true },
+  });
+  if (!q || q.quiz.quizmasterId !== quizmasterId) throw new ApiError(404, "Question introuvable");
+  return q;
+}
+
+async function listQuizzes(userId) {
+  const qm = await resolveQuizmaster(userId);
+  return prisma.quiz.findMany({
+    where: { quizmasterId: qm.id },
+    orderBy: { id: "desc" },
+    include: { _count: { select: { questions: true, preQuestions: true } } },
+  });
+}
+
+async function getQuiz(userId, quizId) {
+  const qm = await resolveQuizmaster(userId);
+  const quiz = await prisma.quiz.findFirst({
+    where: { id: quizId, quizmasterId: qm.id },
+    include: {
+      questions: { orderBy: { id: "asc" }, include: { options: true } },
+      preQuestions: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
+    },
+  });
+  if (!quiz) throw new ApiError(404, "Quiz introuvable");
+  return quiz;
+}
+
+async function createQuiz(userId, body) {
+  const qm = await prisma.quizmaster.findUnique({
+    where: { userId },
+    select: {
+      id: true,
+      brandId: true,
+      isProfileComplete: true,
+    },
+  });
+  if (!qm) throw new ApiError(403, "Compte quizmaster introuvable");
+  if (!qm.isProfileComplete) {
+    throw new ApiError(
+      403,
+      "Profil incomplet : complétez votre profil (photo, téléphone avec indicatif, genre, date de naissance, nom et email) avant de créer un quiz.",
+    );
+  }
+
+  const willBeActive = Boolean(body.isActive);
+  if (willBeActive) {
+    await BrandPlanService.assertActiveQuizBudget(qm.brandId, {
+      wasActive: false,
+      willBeActive: true,
+    });
+  }
+
+  let questionsCreate;
+  if (body.questions?.length) {
+    for (let i = 0; i < body.questions.length; i += 1) {
+      const q = body.questions[i];
+      validateQuestionOptions(q.options || [], `Question ${i + 1}`);
+    }
+    questionsCreate = {
+      create: body.questions.map((q) => ({
+        text: q.text,
+        xpReward: Number(q.xpReward ?? 10),
+        hint: q.hint ?? null,
+        options: {
+          create: (q.options || []).map((o) => ({
+            text: String(o.text).trim(),
+            isCorrect: Boolean(o.isCorrect),
+          })),
+        },
+      })),
+    };
+  }
+
+  const hasPre = Boolean(body.hasPreQuestions);
+  const preList = Array.isArray(body.preQuestions) ? body.preQuestions : [];
+  if (hasPre && preList.length < 1) {
+    throw new ApiError(400, "Au moins une pré-question est requise lorsque l'option est activée.");
+  }
+  let preCreate;
+  if (hasPre && preList.length) {
+    for (let i = 0; i < preList.length; i += 1) {
+      if (!String(preList[i]?.questionText || "").trim()) {
+        throw new ApiError(400, `Pré-question ${i + 1} : texte requis.`);
+      }
+    }
+    preCreate = {
+      create: preList.map((pq, i) => ({
+        questionText: String(pq.questionText).trim(),
+        sortOrder: i,
+      })),
+    };
+  }
+
+  return prisma.quiz.create({
+    data: {
+      brandId: qm.brandId,
+      quizmasterId: qm.id,
+      title: body.title,
+      category: body.category ?? null,
+      image: body.image ?? null,
+      maxCoupons: clampMaxCoupons(body.maxCoupons ?? 10),
+      isActive: Boolean(body.isActive),
+      durationSeconds: clampDurationSeconds(body.durationSeconds ?? 300),
+      passingScore: clampPassingScore(body.passingScore ?? 0.5),
+      hasPreQuestions: Boolean(hasPre && preList.length > 0),
+      questions: questionsCreate,
+      preQuestions: preCreate,
+    },
+    include: {
+      questions: { orderBy: { id: "asc" }, include: { options: true } },
+      preQuestions: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
+    },
+  });
+}
+
+async function updateQuiz(userId, quizId, body) {
+  const qm = await resolveQuizmaster(userId);
+  await assertOwnQuiz(qm.id, quizId);
+
+  const existing = await prisma.quiz.findUnique({
+    where: { id: quizId },
+    select: { isActive: true, brandId: true },
+  });
+  if (!existing) throw new ApiError(404, "Quiz introuvable");
+
+  if (body.isActive !== undefined) {
+    await BrandPlanService.assertActiveQuizBudget(existing.brandId, {
+      wasActive: existing.isActive,
+      willBeActive: Boolean(body.isActive),
+    });
+  }
+
+  const data = {
+    ...(body.title != null && { title: body.title }),
+    ...(body.category !== undefined && { category: body.category }),
+    ...(body.image !== undefined && { image: body.image }),
+    ...(body.maxCoupons != null && { maxCoupons: clampMaxCoupons(body.maxCoupons) }),
+    ...(body.durationSeconds != null && { durationSeconds: clampDurationSeconds(body.durationSeconds) }),
+    ...(body.passingScore != null && { passingScore: clampPassingScore(body.passingScore) }),
+    ...(body.isActive !== undefined && { isActive: Boolean(body.isActive) }),
+    ...(body.randomizeQuestions !== undefined && {
+      randomizeQuestions: Boolean(body.randomizeQuestions),
+    }),
+    ...(body.shuffleOptions !== undefined && { shuffleOptions: Boolean(body.shuffleOptions) }),
+  };
+
+  const touchesPre = body.preQuestions !== undefined || body.hasPreQuestions !== undefined;
+
+  if (!touchesPre) {
+    return prisma.quiz.update({
+      where: { id: quizId },
+      data,
+      include: {
+        questions: { orderBy: { id: "asc" }, include: { options: true } },
+        preQuestions: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
+      },
+    });
+  }
+
+  return prisma.$transaction(async (tx) => {
+    if (Object.keys(data).length) {
+      await tx.quiz.update({ where: { id: quizId }, data });
+    }
+
+    if (body.preQuestions !== undefined) {
+      if (body.hasPreQuestions === false) {
+        await tx.preQuestion.deleteMany({ where: { quizId } });
+        await tx.quiz.update({ where: { id: quizId }, data: { hasPreQuestions: false } });
+      } else {
+        const arr = Array.isArray(body.preQuestions) ? body.preQuestions : [];
+        for (let i = 0; i < arr.length; i += 1) {
+          if (!String(arr[i]?.questionText || "").trim()) {
+            throw new ApiError(400, `Pré-question ${i + 1} : texte requis.`);
+          }
+        }
+
+        const explicitOn = body.hasPreQuestions === true;
+        const wantOn = explicitOn || arr.length > 0;
+
+        if (wantOn && arr.length < 1) {
+          throw new ApiError(400, "Au moins une pré-question est requise lorsque l'option est activée.");
+        }
+
+        await tx.preQuestion.deleteMany({ where: { quizId } });
+
+        if (arr.length) {
+          await tx.preQuestion.createMany({
+            data: arr.map((pq, i) => ({
+              quizId,
+              questionText: String(pq.questionText).trim(),
+              sortOrder: i,
+            })),
+          });
+        }
+
+        const nextFlag = arr.length > 0;
+        await tx.quiz.update({
+          where: { id: quizId },
+          data: { hasPreQuestions: nextFlag },
+        });
+      }
+    } else if (body.hasPreQuestions !== undefined) {
+      if (body.hasPreQuestions === false) {
+        await tx.preQuestion.deleteMany({ where: { quizId } });
+        await tx.quiz.update({ where: { id: quizId }, data: { hasPreQuestions: false } });
+      } else {
+        const n = await tx.preQuestion.count({ where: { quizId } });
+        if (n < 1) {
+          throw new ApiError(400, "Ajoutez au moins une pré-question avant d'activer cette option.");
+        }
+        await tx.quiz.update({ where: { id: quizId }, data: { hasPreQuestions: true } });
+      }
+    }
+
+    return tx.quiz.findFirst({
+      where: { id: quizId },
+      include: {
+        questions: { orderBy: { id: "asc" }, include: { options: true } },
+        preQuestions: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
+      },
+    });
+  });
+}
+
+async function deleteQuiz(userId, quizId) {
+  const qm = await resolveQuizmaster(userId);
+  await assertOwnQuiz(qm.id, quizId);
+  await prisma.quiz.delete({ where: { id: quizId } });
+}
+
+async function addQuestion(userId, quizId, body) {
+  const qm = await resolveQuizmaster(userId);
+  await assertOwnQuiz(qm.id, quizId);
+
+  validateQuestionOptions(body.options || [], "Question");
+
+  return prisma.question.create({
+    data: {
+      quizId,
+      text: body.text,
+      xpReward: Number(body.xpReward ?? 10),
+      hint: body.hint ?? null,
+      options: {
+        create: (body.options || []).map((o) => ({
+          text: String(o.text).trim(),
+          isCorrect: Boolean(o.isCorrect),
+        })),
+      },
+    },
+    include: { options: true },
+  });
+}
+
+async function updateQuestion(userId, questionId, body) {
+  const qm = await resolveQuizmaster(userId);
+  await assertOwnQuestion(qm.id, questionId);
+
+  validateQuestionOptions(body.options || [], "Question");
+
+  await prisma.option.deleteMany({ where: { questionId } });
+
+  return prisma.question.update({
+    where: { id: questionId },
+    data: {
+      text: body.text,
+      xpReward: Number(body.xpReward ?? 10),
+      hint: body.hint ?? null,
+      options: {
+        create: (body.options || []).map((o) => ({
+          text: String(o.text).trim(),
+          isCorrect: Boolean(o.isCorrect),
+        })),
+      },
+    },
+    include: { options: true },
+  });
+}
+
+async function deleteQuestion(userId, questionId) {
+  const qm = await resolveQuizmaster(userId);
+  await assertOwnQuestion(qm.id, questionId);
+  await prisma.question.delete({ where: { id: questionId } });
+}
+
+module.exports = {
+  resolveQuizmaster,
+  listQuizzes,
+  getQuiz,
+  createQuiz,
+  updateQuiz,
+  deleteQuiz,
+  addQuestion,
+  updateQuestion,
+  deleteQuestion,
 };
-
-/**
- * QuizmasterService — Logique métier pour la gestion des quizmasters par l'admin.
- */
-const QuizmasterService = {
-    /**
-     * Crée un nouvel utilisateur avec le rôle "quizmaster", lié à un brand.
-     * @param {{ name: string, email: string, password: string, brandId: number }} data
-     */
-    async create({ name, email, password, brandId }) {
-        // Vérifier que l'email n'est pas déjà utilisé
-        const existing = await prisma.user.findUnique({ where: { email } });
-        if (existing) {
-            throw new ApiError(409, "Cet email est déjà utilisé");
-        }
-
-        // Vérifier que le brand existe et a le rôle "brand"
-        const brand = await prisma.user.findUnique({
-            where: { id: brandId },
-            select: { id: true, role: true },
-        });
-
-        if (!brand) {
-            throw new ApiError(404, `Brand avec ID ${brandId} introuvable`);
-        }
-        if (brand.role !== "brand") {
-            throw new ApiError(400, "L'utilisateur spécifié n'a pas le rôle 'brand'");
-        }
-
-        const hashed = await bcrypt.hash(password, 10);
-
-        const quizmaster = await prisma.user.create({
-            data: { name, email, password: hashed, role: "quizmaster", brandId },
-            select: quizmasterSelect,
-        });
-
-        return quizmaster;
-    },
-
-    /**
-     * Récupère la liste paginée de tous les quizmasters.
-     * Filtre optionnel par brandId.
-     * @param {{ brandId?: number, page: number, limit: number }} options
-     */
-    async getAll({ brandId, page = 1, limit = 10 }) {
-        const where = { role: "quizmaster" };
-        if (brandId) {
-            where.brandId = brandId;
-        }
-        const skip = (page - 1) * limit;
-
-        const [quizmasters, total] = await prisma.$transaction([
-            prisma.user.findMany({
-                where,
-                skip,
-                take: limit,
-                orderBy: { createdAt: "desc" },
-                select: quizmasterSelect,
-            }),
-            prisma.user.count({ where }),
-        ]);
-
-        return {
-            quizmasters,
-            total,
-            page,
-            totalPages: Math.ceil(total / limit),
-        };
-    },
-
-    /**
-     * Récupère un quizmaster par son ID.
-     * @param {number} id
-     */
-    async getById(id) {
-        const quizmaster = await prisma.user.findUnique({
-            where: { id },
-            select: quizmasterSelect,
-        });
-
-        if (!quizmaster || quizmaster.role !== "quizmaster") {
-            throw new ApiError(404, `Quizmaster avec ID ${id} introuvable`);
-        }
-
-        return quizmaster;
-    },
-
-    /**
-     * Met à jour un quizmaster existant.
-     * @param {number} id
-     * @param {{ name?: string, email?: string, password?: string, brandId?: number }} data
-     */
-    async update(id, data) {
-        const quizmaster = await prisma.user.findUnique({
-            where: { id },
-            select: { id: true, role: true },
-        });
-
-        if (!quizmaster || quizmaster.role !== "quizmaster") {
-            throw new ApiError(404, `Quizmaster avec ID ${id} introuvable`);
-        }
-
-        // Vérifier l'unicité de l'email si modifié
-        if (data.email) {
-            const existing = await prisma.user.findUnique({ where: { email: data.email } });
-            if (existing && existing.id !== id) {
-                throw new ApiError(409, "Cet email est déjà utilisé par un autre utilisateur");
-            }
-        }
-
-        // Vérifier que le nouveau brand existe si brandId est modifié
-        if (data.brandId) {
-            const brand = await prisma.user.findUnique({
-                where: { id: data.brandId },
-                select: { id: true, role: true },
-            });
-            if (!brand) {
-                throw new ApiError(404, `Brand avec ID ${data.brandId} introuvable`);
-            }
-            if (brand.role !== "brand") {
-                throw new ApiError(400, "L'utilisateur spécifié n'a pas le rôle 'brand'");
-            }
-        }
-
-        // Hasher le nouveau mot de passe si fourni
-        if (data.password) {
-            data.password = await bcrypt.hash(data.password, 10);
-        }
-
-        const updated = await prisma.user.update({
-            where: { id },
-            data,
-            select: quizmasterSelect,
-        });
-
-        return updated;
-    },
-
-    /**
-     * Supprime un quizmaster.
-     * @param {number} id
-     */
-    async delete(id) {
-        const quizmaster = await prisma.user.findUnique({
-            where: { id },
-            select: { id: true, role: true, email: true },
-        });
-
-        if (!quizmaster || quizmaster.role !== "quizmaster") {
-            throw new ApiError(404, `Quizmaster avec ID ${id} introuvable`);
-        }
-
-        // Supprimer les quizzes du quizmaster (cascade: questions, options, attempts, answers)
-        const quizIds = (await prisma.quiz.findMany({
-            where: { quizmasterId: id },
-            select: { id: true },
-        })).map(q => q.id);
-
-        if (quizIds.length > 0) {
-            await prisma.answer.deleteMany({ where: { attempt: { quizId: { in: quizIds } } } });
-            const attemptIds = (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id);
-            if (attemptIds.length > 0) {
-                await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: attemptIds } } });
-            }
-            await prisma.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
-            await prisma.option.deleteMany({ where: { question: { quizId: { in: quizIds } } } });
-            await prisma.question.deleteMany({ where: { quizId: { in: quizIds } } });
-            await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
-        }
-
-        // Supprimer les badges et notifications du quizmaster
-        await prisma.userBadge.deleteMany({ where: { userId: id } });
-        await prisma.notification.deleteMany({ where: { userId: id } });
-
-        await prisma.user.delete({ where: { id } });
-
-        return { id, email: quizmaster.email };
-    },
-};
-
-module.exports = QuizmasterService;

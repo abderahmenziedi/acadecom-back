@@ -1,160 +1,74 @@
 const ParticipantService = require("../services/participant.service");
+const GameService = require("../services/game.service");
+const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/ApiError");
-const {
-    quizIdParamSchema,
-    attemptIdParamSchema,
-    idParamSchema,
-    availableQuizzesQuerySchema,
-    attemptsQuerySchema,
-    pointsHistoryQuerySchema,
-} = require("../validations/participant.validation");
 
-/**
- * Helpers — parse et valide les paramètres d'URL / query.
- */
-function parseParam(schema, params) {
-    const result = schema.safeParse(params);
-    if (!result.success) {
-        const msgs = Object.values(result.error.flatten().fieldErrors).flat();
-        throw new ApiError(400, msgs[0] || "Paramètre invalide");
-    }
-    return result.data;
-}
+const profile = asyncHandler(async (req, res) => {
+  const data = await ParticipantService.getProfile(req.user.id);
+  res.json({
+    status: "success",
+    data,
+  });
+});
 
-function parseQuery(schema, query) {
-    const result = schema.safeParse(query);
-    if (!result.success) {
-        const msgs = Object.values(result.error.flatten().fieldErrors).flat();
-        throw new ApiError(400, msgs[0] || "Paramètres de requête invalides");
-    }
-    return result.data;
-}
+const patchProfile = asyncHandler(async (req, res) => {
+  const photoPath = req.file ? `/uploads/participants/${req.file.filename}` : undefined;
+  const data = await ParticipantService.updateParticipantProfile(req.user.id, req.body, photoPath);
+  res.json({ status: "success", data });
+});
 
-/**
- * ParticipantController — Couche contrôleur du module Participant.
- */
-const ParticipantController = {
+const listQuizzes = asyncHandler(async (req, res) => {
+  const p = await ParticipantService.resolveParticipant(req.user.id);
+  const data = await ParticipantService.listParticipantQuizzes(p.id);
+  res.json({ status: "success", data });
+});
 
-    // ─── Profil ──────────────────────────────────────────────────
+const startQuiz = asyncHandler(async (req, res) => {
+  const data = await ParticipantService.startQuizAttempt(req.user.id, Number(req.params.quizId));
+  res.json({ status: "success", data });
+});
 
-    async getProfile(req, res, next) {
-        try {
-            const profile = await ParticipantService.getProfile(req.user.id);
-            res.status(200).json({ status: "success", data: { profile } });
-        } catch (err) { next(err); }
-    },
+const getQuizPlay = asyncHandler(async (req, res) => {
+  const p = await ParticipantService.resolveParticipant(req.user.id);
+  const data = await ParticipantService.getQuizForPlay(Number(req.params.quizId), p.id);
+  res.json({ status: "success", data });
+});
 
-    async updateProfile(req, res, next) {
-        try {
-            const profile = await ParticipantService.updateProfile(req.user.id, req.body);
-            res.status(200).json({ status: "success", message: "Profil mis à jour", data: { profile } });
-        } catch (err) { next(err); }
-    },
+const submitPreAnswers = asyncHandler(async (req, res) => {
+  const data = await ParticipantService.submitPreQuizAnswers(
+    req.user.id,
+    Number(req.params.quizId),
+    req.body,
+  );
+  res.json({ status: "success", data });
+});
 
-    async getStats(req, res, next) {
-        try {
-            const stats = await ParticipantService.getStats(req.user.id);
-            res.status(200).json({ status: "success", data: { stats } });
-        } catch (err) { next(err); }
-    },
+const playQuiz = asyncHandler(async (req, res, next) => {
+  const { answers, durationSeconds } = req.body || {};
+  if (!Array.isArray(answers)) return next(new ApiError(400, "answers doit être un tableau"));
+  const p = await ParticipantService.resolveParticipant(req.user.id);
+  const result = await GameService.playQuiz(p.id, Number(req.params.quizId), answers, durationSeconds ?? 0);
+  res.status(201).json({ status: "success", data: result });
+});
 
-    // ─── Quiz disponibles ────────────────────────────────────────
+const sessionResult = asyncHandler(async (req, res) => {
+  const data = await ParticipantService.getSessionResult(req.user.id, Number(req.params.sessionId));
+  res.json({ status: "success", data });
+});
 
-    async listAvailableQuizzes(req, res, next) {
-        try {
-            const filters = parseQuery(availableQuizzesQuerySchema, req.query);
-            const data = await ParticipantService.listAvailableQuizzes(filters);
-            res.status(200).json({ status: "success", message: `${data.total} quiz(zes) disponible(s)`, data });
-        } catch (err) { next(err); }
-    },
+const sessions = asyncHandler(async (req, res) => {
+  const data = await ParticipantService.listSessions(req.user.id);
+  res.json({ status: "success", data });
+});
 
-    // ─── Participation ───────────────────────────────────────────
-
-    async startAttempt(req, res, next) {
-        try {
-            const { quizId } = parseParam(quizIdParamSchema, req.params);
-            const data = await ParticipantService.startAttempt(quizId, req.user.id);
-            res.status(201).json({ status: "success", message: "Tentative démarrée", data });
-        } catch (err) { next(err); }
-    },
-
-    async answerQuestion(req, res, next) {
-        try {
-            const { attemptId } = parseParam(attemptIdParamSchema, req.params);
-            const answer = await ParticipantService.answerQuestion(attemptId, req.user.id, req.body);
-            res.status(201).json({ status: "success", message: "Réponse enregistrée", data: { answer } });
-        } catch (err) { next(err); }
-    },
-
-    async finishAttempt(req, res, next) {
-        try {
-            const { attemptId } = parseParam(attemptIdParamSchema, req.params);
-            const result = await ParticipantService.finishAttempt(attemptId, req.user.id);
-            res.status(200).json({ status: "success", message: "Tentative terminée", data: { result } });
-        } catch (err) { next(err); }
-    },
-
-    async submitAndFinish(req, res, next) {
-        try {
-            const { attemptId } = parseParam(attemptIdParamSchema, req.params);
-            const result = await ParticipantService.submitAndFinish(attemptId, req.user.id, req.body.answers);
-            res.status(200).json({ status: "success", message: "Réponses soumises avec succès", data: { result } });
-        } catch (err) { next(err); }
-    },
-
-    // ─── Résultat ────────────────────────────────────────────────
-
-    async getAttemptResult(req, res, next) {
-        try {
-            const { attemptId } = parseParam(attemptIdParamSchema, req.params);
-            const result = await ParticipantService.getAttemptResult(attemptId, req.user.id);
-            res.status(200).json({ status: "success", data: { result } });
-        } catch (err) { next(err); }
-    },
-
-    // ─── Historique ──────────────────────────────────────────────
-
-    async getAttempts(req, res, next) {
-        try {
-            const filters = parseQuery(attemptsQuerySchema, req.query);
-            const data = await ParticipantService.getAttempts(req.user.id, filters);
-            res.status(200).json({ status: "success", message: `${data.total} tentative(s)`, data });
-        } catch (err) { next(err); }
-    },
-
-    async getAttemptDetail(req, res, next) {
-        try {
-            const { id } = parseParam(idParamSchema, req.params);
-            const attempt = await ParticipantService.getAttemptDetail(id, req.user.id);
-            res.status(200).json({ status: "success", data: { attempt } });
-        } catch (err) { next(err); }
-    },
-
-    // ─── Wallet / Points ─────────────────────────────────────────
-
-    async getWallet(req, res, next) {
-        try {
-            const wallet = await ParticipantService.getWallet(req.user.id);
-            res.status(200).json({ status: "success", data: { wallet } });
-        } catch (err) { next(err); }
-    },
-
-    async getPointsHistory(req, res, next) {
-        try {
-            const filters = parseQuery(pointsHistoryQuerySchema, req.query);
-            const data = await ParticipantService.getPointsHistory(req.user.id, filters);
-            res.status(200).json({ status: "success", data });
-        } catch (err) { next(err); }
-    },
-
-    // ─── Recommandations ─────────────────────────────────────────
-
-    async getRecommendations(req, res, next) {
-        try {
-            const quizzes = await ParticipantService.getRecommendations(req.user.id);
-            res.status(200).json({ status: "success", data: { recommendations: quizzes } });
-        } catch (err) { next(err); }
-    },
+module.exports = {
+  profile,
+  patchProfile,
+  listQuizzes,
+  startQuiz,
+  getQuizPlay,
+  submitPreAnswers,
+  playQuiz,
+  sessionResult,
+  sessions,
 };
-
-module.exports = ParticipantController;

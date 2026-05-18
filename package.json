@@ -1,15 +1,29 @@
 {
   "name": "acadecom-back",
-  "version": "1.0.0",
-  "description": "AcademCom Authentication Backend API",
+  "version": "2.0.0",
+  "private": true,
+  "description": "AcadeCom API — student project",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js",
-    "db:reset": "npx prisma migrate reset",
-    "db:push": "npx prisma db push",
+    "postinstall": "prisma generate",
+    "db:reset": "npx prisma migrate reset --force",
     "db:seed": "node prisma/seed.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --runInBand"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout": 30000,
+    "roots": ["<rootDir>/tests"],
+    "setupFiles": ["<rootDir>/tests/setupEnv.js"],
+    "globalSetup": "<rootDir>/tests/globalSetup.js",
+    "globalTeardown": "<rootDir>/tests/globalTeardown.js",
+    "setupFilesAfterEnv": ["<rootDir>/tests/setupAfterEnv.js"],
+    "testMatch": ["**/*.integration.test.js"]
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   },
   "keywords": [],
   "author": "",
@@ -25,9 +39,12 @@
     "json2csv": "^6.0.0-alpha.2",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
-    "multer": "^2.1.1",
+    "multer": "^2.0.2",
     "prisma": "^6.19.2",
-    "winston": "^3.19.0",
-    "zod": "^4.3.6"
+    "stripe": "^17.7.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
   }
 }

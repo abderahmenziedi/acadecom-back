@@ -1,297 +1,178 @@
-const prisma = require("../config/prisma");
+const prisma = require("../prisma/client");
 const ApiError = require("../utils/ApiError");
-const NotificationService = require("./notification.service");
-const ActivityLogService = require("./activityLog.service");
-const { deleteByPublicUrl } = require("../middlewares/upload");
 
-/**
- * StoreService — Marketplace logic for products, cart, and orders.
- */
-const StoreService = {
-  // ═══════════════════════════════════════════════════════════
-  // PRODUCTS (public browsing)
-  // ═══════════════════════════════════════════════════════════
+async function listProducts(filters = {}) {
+  const page = Number(filters.page) || 1;
+  const limit = Number(filters.limit) || 24;
+  const skip = (page - 1) * limit;
 
-  async listProducts({ page = 1, limit = 12, search, category, brandId }) {
-    const where = { isActive: true, stock: { gt: 0 } };
-    if (search) {
-      where.OR = [
-        { title: { contains: search } },
-        { description: { contains: search } },
-      ];
-    }
-    if (category) where.category = category;
-    if (brandId) where.brandId = brandId;
+  const where = { isActive: true, stock: { gt: 0 } };
+  if (filters.search) {
+    where.OR = [
+      { name: { contains: filters.search } },
+      { brand: { user: { name: { contains: filters.search } } } },
+    ];
+  }
 
-    const skip = (page - 1) * limit;
-
-    const [products, total] = await prisma.$transaction([
-      prisma.product.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          price: true,
-          stock: true,
-          imageUrl: true,
-          category: true,
-          brand: { select: { id: true, name: true } },
-          createdAt: true,
-        },
-      }),
-      prisma.product.count({ where }),
-    ]);
-
-    return { products, total, page, totalPages: Math.ceil(total / limit) };
-  },
-
-  async getProduct(productId) {
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        price: true,
-        stock: true,
-        imageUrl: true,
-        category: true,
-        isActive: true,
-        brand: { select: { id: true, name: true, industry: true } },
-        createdAt: true,
+  const [products, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { id: "desc" },
+      include: {
+        brand: { include: { user: { select: { name: true } } } },
       },
+    }),
+    prisma.product.count({ where }),
+  ]);
+
+  return { products, total, page, pages: Math.ceil(total / limit) };
+}
+
+async function getProduct(productId) {
+  const p = await prisma.product.findUnique({
+    where: { id: Number(productId) },
+    include: { brand: { include: { user: { select: { name: true } } } } },
+  });
+  if (!p || !p.isActive) throw new ApiError(404, "Produit introuvable");
+  return p;
+}
+
+async function placeOrder(participantDbId, userId, items) {
+  if (!items?.length) throw new ApiError(400, "Panier vide");
+
+  const participant = await prisma.participant.findUnique({
+    where: { id: participantDbId },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  });
+  if (!participant?.user) throw new ApiError(404, "Participant introuvable");
+
+  let totalCoupons = 0;
+  const lines = [];
+
+  for (const line of items) {
+    const product = await prisma.product.findUnique({
+      where: { id: Number(line.productId) },
     });
-    if (!product) throw new ApiError(404, "Produit introuvable");
-    return product;
-  },
+    if (!product?.isActive) throw new ApiError(400, `Produit ${line.productId} indisponible`);
+    const qty = Math.max(1, Number(line.quantity) || 1);
+    const lineCost = product.couponPrice * qty;
+    if (product.stock < qty) throw new ApiError(400, `Stock insuffisant (${product.name})`);
+    totalCoupons += lineCost;
+    lines.push({ product, qty, lineCost, unitCouponPrice: product.couponPrice });
+  }
 
-  async getCategories() {
-    const categories = await prisma.product.findMany({
-      where: { isActive: true },
-      select: { category: true },
-      distinct: ["category"],
-    });
-    return categories.map((c) => c.category).filter(Boolean);
-  },
+  if (participant.coupons < totalCoupons) {
+    throw new ApiError(400, `Coupons insuffisants (solde ${participant.coupons}, nécessaire ${totalCoupons})`);
+  }
 
-  // ═══════════════════════════════════════════════════════════
-  // ORDERS (participant purchases)
-  // ═══════════════════════════════════════════════════════════
-
-  async createOrder(userId, items) {
-    if (!items || items.length === 0) {
-      throw new ApiError(400, "Le panier est vide");
+  return prisma.$transaction(async (tx) => {
+    for (const l of lines) {
+      await tx.product.update({
+        where: { id: l.product.id },
+        data: { stock: { decrement: l.qty } },
+      });
     }
 
-    // Fetch all products
-    const productIds = items.map((i) => i.productId);
-    const products = await prisma.product.findMany({
-      where: { id: { in: productIds }, isActive: true },
+    await tx.participant.update({
+      where: { id: participantDbId },
+      data: { coupons: { decrement: totalCoupons } },
     });
 
-    if (products.length !== productIds.length) {
-      throw new ApiError(400, "Un ou plusieurs produits sont invalides ou indisponibles");
-    }
-
-    const productMap = new Map(products.map((p) => [p.id, p]));
-    let totalPrice = 0;
-    const orderItems = [];
-
-    for (const item of items) {
-      const product = productMap.get(item.productId);
-      const qty = item.quantity || 1;
-
-      if (product.stock < qty) {
-        throw new ApiError(400, `Stock insuffisant pour "${product.title}" (disponible: ${product.stock})`);
-      }
-
-      totalPrice += product.price * qty;
-      orderItems.push({
-        productId: product.id,
-        quantity: qty,
-        price: product.price,
-      });
-    }
-
-    // Check user coupons
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { coupons: true },
-    });
-
-    if (user.coupons < totalPrice) {
-      throw new ApiError(400, `Coupons insuffisants (solde: ${user.coupons}, coût: ${totalPrice})`);
-    }
-
-    // Transaction: create order + deduct coupons + update stock + points history
-    const [order] = await prisma.$transaction([
-      prisma.order.create({
-        data: {
-          userId,
-          totalPrice,
-          status: "confirmed",
-          items: { create: orderItems },
+    const order = await tx.order.create({
+      data: {
+        participantId: participantDbId,
+        totalCoupons,
+        items: {
+          create: lines.map((l) => ({
+            productId: l.product.id,
+            quantity: l.qty,
+            unitCouponPrice: l.unitCouponPrice,
+          })),
         },
-        include: {
-          items: {
-            include: { product: { select: { id: true, title: true, imageUrl: true } } },
-          },
-        },
-      }),
-      prisma.user.update({
-        where: { id: userId },
-        data: { coupons: { decrement: totalPrice } },
-      }),
-      // Decrement stock for each product
-      ...items.map((item) =>
-        prisma.product.update({
-          where: { id: item.productId },
-          data: { stock: { decrement: item.quantity || 1 } },
-        })
-      ),
-      prisma.pointsHistory.create({
-        data: {
-          userId,
-          points: -totalPrice,
-          reason: `Achat boutique (${orderItems.length} article(s))`,
-        },
-      }),
-    ]);
-
-    // Notifications fan-out (best effort)
-    try {
-      const participant = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { name: true },
-      });
-      const brandIds = [...new Set(products.map((p) => p.brandId))];
-      await NotificationService.notifyOrderConfirmed({
-        userId,
-        orderId: order.id,
-        totalPrice,
-      });
-      await NotificationService.notifyCouponUsed({
-        brandIds,
-        participantName: participant?.name,
-        totalPrice,
-        items: orderItems.map((oi) => {
-          const p = productMap.get(oi.productId);
-          return { title: p?.title, quantity: oi.quantity };
-        }),
-      });
-      await ActivityLogService.log({
-        actorId: userId,
-        scopeId: brandIds[0] || null,
-        action: "participant_order",
-        entityType: "order",
-        entityId: order.id,
-        metadata: { totalPrice, items: orderItems.length },
-      });
-    } catch (_) { /* ignore */ }
-
-    return order;
-  },
-
-  async getOrders(userId, { page = 1, limit = 10 }) {
-    const skip = (page - 1) * limit;
-    const where = { userId };
-
-    const [orders, total] = await prisma.$transaction([
-      prisma.order.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: "desc" },
-        include: {
-          items: {
-            include: { product: { select: { id: true, title: true, imageUrl: true } } },
-          },
-        },
-      }),
-      prisma.order.count({ where }),
-    ]);
-
-    return { orders, total, page, totalPages: Math.ceil(total / limit) };
-  },
-
-  async getOrderDetail(orderId, userId) {
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
+      },
       include: {
         items: {
-          include: { product: { select: { id: true, title: true, imageUrl: true, description: true } } },
+          include: {
+            product: {
+              include: { brand: { select: { userId: true } } },
+            },
+          },
         },
       },
     });
-    if (!order) throw new ApiError(404, "Commande introuvable");
-    if (order.userId !== userId) throw new ApiError(403, "Accès refusé");
-    return order;
-  },
 
-  // ═══════════════════════════════════════════════════════════
-  // BRAND PRODUCT MANAGEMENT
-  // ═══════════════════════════════════════════════════════════
-
-  async createProduct(brandId, data) {
-    return prisma.product.create({
-      data: { ...data, brandId },
+    await tx.notification.create({
+      data: {
+        userId,
+        type: "order_confirmed",
+        message: `Commande #${order.id} créée (${totalCoupons} coupons).`,
+      },
     });
-  },
 
-  async updateProduct(productId, brandId, data) {
-    const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) throw new ApiError(404, "Produit introuvable");
-    if (product.brandId !== brandId) throw new ApiError(403, "Ce produit ne vous appartient pas");
-
-    return prisma.product.update({
-      where: { id: productId },
-      data,
-    });
-  },
-
-  async deleteProduct(productId, brandId) {
-    const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) throw new ApiError(404, "Produit introuvable");
-    if (product.brandId !== brandId) throw new ApiError(403, "Ce produit ne vous appartient pas");
-
-    await prisma.product.update({
-      where: { id: productId },
-      data: { isActive: false },
-    });
-  },
-
-  async getBrandProducts(brandId, { page = 1, limit = 20 }) {
-    const skip = (page - 1) * limit;
-    const where = { brandId };
-
-    const [products, total] = await prisma.$transaction([
-      prisma.product.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          price: true,
-          stock: true,
-          imageUrl: true,
-          category: true,
-          isActive: true,
-          createdAt: true,
-          _count: { select: { orderItems: true } },
+    const brandLines = new Map();
+    for (const item of order.items) {
+      const uid = item.product.brand.userId;
+      if (!brandLines.has(uid)) brandLines.set(uid, []);
+      const spent = item.quantity * item.unitCouponPrice;
+      brandLines.get(uid).push(`« ${item.product.name} » ×${item.quantity} (${spent} coupons)`);
+    }
+    for (const [brandUserId, lineMsgs] of brandLines.entries()) {
+      await tx.notification.create({
+        data: {
+          userId: brandUserId,
+          type: "order_created",
+          message: `Nouvel achat — ${participant.user.name} (${participant.user.email}) — ${lineMsgs.join(" ; ")}.`,
         },
-      }),
-      prisma.product.count({ where }),
-    ]);
+      });
+    }
 
-    return { products, total, page, totalPages: Math.ceil(total / limit) };
-  },
+    return order;
+  });
+}
+
+async function listOrders(participantDbId) {
+  return prisma.order.findMany({
+    where: { participantId: participantDbId },
+    orderBy: { id: "desc" },
+    include: {
+      items: {
+        include: {
+          product: {
+            include: {
+              brand: { include: { user: { select: { name: true } } } },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+async function getOrder(participantDbId, orderId) {
+  const o = await prisma.order.findFirst({
+    where: { id: Number(orderId), participantId: participantDbId },
+    include: {
+      items: {
+        include: {
+          product: {
+            include: {
+              brand: { include: { user: { select: { name: true } } } },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!o) throw new ApiError(404, "Commande introuvable");
+  return o;
+}
+
+module.exports = {
+  listProducts,
+  getProduct,
+  placeOrder,
+  listOrders,
+  getOrder,
 };
-
-module.exports = StoreService;

@@ -1,185 +1,150 @@
-/**
- * auth.service.js — authentication business rules.
- *
- * Responsibilities:
- *   - Validate role-specific invariants (quizmaster requires an active brand).
- *   - Hash passwords with bcrypt (10 rounds — explicit, matches existing data).
- *   - Sign JWTs with the configured TTL.
- *   - Surface friendly errors via `ApiError`.
- *
- * Anything touching Prisma directly lives in `repositories/user.repository.js`.
- */
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const prisma = require("../prisma/client");
+const ApiError = require("../utils/ApiError");
 
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const JWT_EXPIRES = "8h";
 
-const UserRepository = require('../repositories/user.repository');
-const ApiError = require('../utils/ApiError');
-const {
-  MSG_QUIZMASTER_BRAND_REMOVED,
-  MSG_BRAND_ACCOUNT_CLOSED,
-  CODE_ACCOUNT_REVOKED,
-  CODE_BRAND_REMOVED,
-  CODE_INVALID_QUIZMASTER,
-} = require('../constants/accounts');
+async function buildAuthUserPayload(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { brand: true, quizmaster: true, participant: { include: { xpRank: true } } },
+  });
+  if (!user) throw new ApiError(500, "Utilisateur introuvable après inscription");
+  /** @type {Record<string, unknown>} */
+  const base = {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    isBlocked: user.isBlocked,
+    brandId: user.brand?.id ?? null,
+    quizmasterId: user.quizmaster?.id ?? null,
+    participantId: user.participant?.id ?? null,
+  };
+  if (user.role === "quizmaster" && user.quizmaster) {
+    base.quizmasterApprovalStatus = user.quizmaster.approvalStatus;
+  }
+  return base;
+}
 
-const BCRYPT_ROUNDS = 10;
-const ACCESS_TOKEN_TTL = process.env.ACCESS_TOKEN_TTL || '4h';
-
-/**
- * Strip the password column from a user row (defensive).
- * @param {object} user
- */
-function omitPassword(user) {
-  if (!user) return user;
-  const { password: _pw, ...safe } = user;
-  return safe;
+async function listBrandsForSignup() {
+  const rows = await prisma.brand.findMany({
+    select: {
+      id: true,
+      industry: true,
+      user: { select: { name: true } },
+    },
+    orderBy: { id: "asc" },
+  });
+  return rows.map((r) => ({ id: r.id, name: r.user?.name ?? "Marque", industry: r.industry }));
 }
 
 /**
- * Build the JWT payload for a user (kept minimal — services revalidate role
- * via the auth middleware on every request).
- *
- * @param {{ id: number, role: string, brandId?: number }} user
+ * @param {{ email: string, password: string, name: string, role?: string, brandId?: number }} payload
  */
-function buildJwtPayload(user) {
-  const payload = { id: user.id, role: user.role };
-  if (user.role === 'quizmaster' && user.brandId) payload.brandId = user.brandId;
-  return payload;
-}
+async function register(payload) {
+  const { email, password, name, brandId } = payload;
+  let role =
+    typeof payload.role === "string" ? payload.role.trim().toLowerCase() : "participant";
 
-const AuthService = {
-  ACCESS_TOKEN_TTL,
+  if (!["participant", "brand", "quizmaster"].includes(role)) {
+    throw new ApiError(400, "Rôle invalide (participant, brand ou quizmaster)");
+  }
 
-  /**
-   * Register a new account. Admins cannot be created via this path.
-   *
-   * @param {object} input
-   * @returns {Promise<object>} The created user (without password).
-   */
-  async register(input) {
-    const { name, email, password, role = 'participant', brandId } = input;
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) throw new ApiError(409, "Email déjà utilisé");
 
-    if (await UserRepository.emailExists(email)) {
-      // Note: this *does* reveal email existence — acceptable trade-off for
-      // user experience on a PFE. A future hardening would route both
-      // "already exists" and "created" through the same email-verification
-      // flow.
-      throw ApiError.conflict('Cet email est déjà enregistré');
-    }
+  const hashed = await bcrypt.hash(password, 10);
+  /** @type {import("@prisma/client").User | null} */
+  let created = null;
 
-    if (role === 'quizmaster') {
-      if (!brandId) {
-        throw ApiError.badRequest('Un quizmaster doit obligatoirement sélectionner une marque.');
-      }
-      const brand = await UserRepository.findById(brandId);
-      if (!brand || brand.role !== 'brand') {
-        throw ApiError.notFound('Marque introuvable');
-      }
-      if (brand.isBlocked) {
-        throw ApiError.badRequest("Cette marque n'accepte plus de nouveaux quizmasters");
-      }
-    }
-
-    const hashed = await bcrypt.hash(password, BCRYPT_ROUNDS);
-
-    const created = await UserRepository.create(
-      {
-        name,
+  if (role === "participant") {
+    const firstRank = await prisma.xpRank.findFirst({ orderBy: { minXp: "asc" } });
+    if (!firstRank) throw new ApiError(500, "Rangs XP manquants — exécutez le seed");
+    created = await prisma.user.create({
+      data: {
         email,
         password: hashed,
-        role,
-        ...(role === 'quizmaster' && brandId ? { brandId } : {}),
+        name,
+        role: "participant",
+        participant: {
+          create: { xpRankId: firstRank.id },
+        },
       },
-      {
-        include:
-          role === 'quizmaster'
-            ? { brand: { select: { id: true, name: true, email: true } } }
-            : undefined,
-      },
-    );
-
-    return omitPassword(created);
-  },
-
-  /**
-   * Verify credentials and return a JWT + the safe user projection.
-   *
-   * @param {{ email: string, password: string }} input
-   */
-  async login({ email, password }) {
-    const user = await UserRepository.findByEmailWithPassword(email);
-
-    // Deliberately uniform error to avoid email enumeration.
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      throw ApiError.unauthorized('Identifiants invalides');
-    }
-
-    if (user.role === 'brand' && user.brandDeletedAt) {
-      throw ApiError.forbidden(MSG_BRAND_ACCOUNT_CLOSED, { code: CODE_BRAND_REMOVED });
-    }
-    if (user.isBlocked) {
-      throw ApiError.forbidden(
-        user.deactivatedReason ||
-          'Votre compte a été suspendu. Veuillez contacter un administrateur.',
-        { code: CODE_ACCOUNT_REVOKED },
-      );
-    }
-
-    let brand;
-    if (user.role === 'quizmaster') {
-      if (!user.brandId) {
-        throw ApiError.forbidden(
-          'Compte quizmaster invalide : aucune marque associée. Contactez un administrateur.',
-          { code: CODE_INVALID_QUIZMASTER },
-        );
-      }
-      const parent = await UserRepository.findById(user.brandId);
-      if (!parent || parent.isBlocked) {
-        throw ApiError.forbidden(MSG_QUIZMASTER_BRAND_REMOVED, { code: CODE_ACCOUNT_REVOKED });
-      }
-      brand = { id: parent.id, email: parent.email, name: parent.name };
-    }
-
-    const token = jwt.sign(buildJwtPayload(user), process.env.JWT_SECRET, {
-      expiresIn: ACCESS_TOKEN_TTL,
     });
-
-    return {
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        ...(user.role === 'quizmaster' ? { brandId: user.brandId, brand } : {}),
+  } else if (role === "brand") {
+    created = await prisma.user.create({
+      data: {
+        email,
+        password: hashed,
+        name,
+        role: "brand",
+        brand: { create: {} },
       },
-    };
-  },
+    });
+  } else {
+    const bid = typeof brandId === "number" ? brandId : parseInt(String(brandId ?? ""), 10);
+    if (!Number.isInteger(bid) || bid < 1) {
+      throw new ApiError(400, "brandId obligatoire pour un compte quizmaster");
+    }
+    const brand = await prisma.brand.findUnique({
+      where: { id: bid },
+      include: { user: { select: { name: true } } },
+    });
+    if (!brand) throw new ApiError(404, "Marque introuvable");
+    created = await prisma.user.create({
+      data: {
+        email,
+        password: hashed,
+        name,
+        role: "quizmaster",
+        quizmaster: {
+          create: {
+            brandId: bid,
+            approvalStatus: "PENDING",
+          },
+        },
+      },
+    });
+    await prisma.notification
+      .create({
+        data: {
+          userId: brand.userId,
+          type: "quizmaster_pending_approval",
+          message: `${name} (${email}) demande à rejoindre votre marque${brand.user?.name ? ` « ${brand.user.name} »` : ""} en tant que quizmaster. Ouvrez le détail pour activer ou refuser.`,
+        },
+      })
+      .catch(() => {});
+  }
 
-  /**
-   * Logout — JWT is stateless, so this is a no-op on the server. Kept for
-   * audit-trail extension points (Phase 2b will log this to ActivityLog).
-   */
-  async logout(/* userId */) {
-    return { message: 'Déconnexion réussie' };
-  },
+  const token = jwt.sign({ id: created.id, role: created.role }, process.env.JWT_SECRET, {
+    expiresIn: JWT_EXPIRES,
+  });
+  const profile = await buildAuthUserPayload(created.id);
+  return { token, user: profile };
+}
 
-  /**
-   * The "current user" payload (used by `GET /auth/me`).
-   * @param {number} userId
-   */
-  async me(userId) {
-    const user = await UserRepository.findById(userId);
-    if (!user) throw ApiError.notFound('Utilisateur introuvable');
-    return user;
-  },
+/** Profil léger avec statut blocage ; utilisable alors que `enforceActiveAccount` bloque les autres routes. */
+async function getAuthSessionSnapshot(userId) {
+  return buildAuthUserPayload(userId);
+}
 
-  /** Public list of brands available for quizmaster registration. */
-  async listPublicBrands() {
-    return UserRepository.listActiveBrands();
-  },
-};
+async function login({ email, password }) {
+  const row = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, password: true, role: true, isBlocked: true },
+  });
+  if (!row) throw new ApiError(401, "Identifiants invalides");
 
-module.exports = AuthService;
+  const ok = await bcrypt.compare(password, row.password);
+  if (!ok) throw new ApiError(401, "Identifiants invalides");
+
+  const token = jwt.sign({ id: row.id, role: row.role }, process.env.JWT_SECRET, {
+    expiresIn: JWT_EXPIRES,
+  });
+  const user = await buildAuthUserPayload(row.id);
+  return { token, user };
+}
+
+module.exports = { register, login, listBrandsForSignup, getAuthSessionSnapshot };

@@ -1,45 +1,64 @@
-/**
- * auth.controller.js — HTTP layer for authentication.
- *
- * Each handler is wrapped in `asyncHandler` and delegates the work to
- * `AuthService`. Responses go through the `responder` envelope so the API
- * shape stays consistent across the codebase.
- */
+const AuthService = require("../services/auth.service");
+const ApiError = require("../utils/ApiError");
+const asyncHandler = require("../utils/asyncHandler");
 
-const AuthService = require('../services/auth.service');
-const asyncHandler = require('../utils/asyncHandler');
-const { ok, created } = require('../utils/responder');
+function normalizeRegisterRole(role) {
+  if (role === undefined || role === null || role === "") return "participant";
+  return String(role).trim().toLowerCase();
+}
 
-const AuthController = {
-  /** POST /api/v1/auth/register */
-  register: asyncHandler(async (req, res) => {
-    const user = await AuthService.register(req.body);
-    return created(res, { user }, 'Compte créé avec succès');
-  }),
+async function register(req, res, next) {
+  const body = typeof req.body === "object" && req.body ? req.body : {};
+  const { email, password, name, brandId: rawBrandId } = body;
+  if (!email || !password || !name) {
+    return next(new ApiError(400, "email, password, name requis"));
+  }
 
-  /** POST /api/v1/auth/login */
-  login: asyncHandler(async (req, res) => {
-    const { token, user } = await AuthService.login(req.body);
-    return ok(res, { token, user }, 'Connexion réussie');
-  }),
+  const role = normalizeRegisterRole(body.role);
 
-  /** POST /api/v1/auth/logout */
-  logout: asyncHandler(async (req, res) => {
-    const result = await AuthService.logout(req.user.id);
-    return ok(res, null, result.message);
-  }),
+  /** @type {undefined | number} */
+  let brandId;
+  if (rawBrandId !== undefined && rawBrandId !== null && rawBrandId !== "") {
+    const n = typeof rawBrandId === "number" ? rawBrandId : parseInt(String(rawBrandId), 10);
+    if (!Number.isInteger(n) || n < 1) return next(new ApiError(400, "brandId invalide"));
+    brandId = n;
+  }
 
-  /** GET /api/v1/auth/me */
-  me: asyncHandler(async (req, res) => {
-    const user = await AuthService.me(req.user.id);
-    return ok(res, { user });
-  }),
+  const data = await AuthService.register({
+    email: String(email),
+    password: String(password),
+    name: String(name),
+    role,
+    brandId,
+  });
+  res.status(201).json({ status: "success", data });
+}
 
-  /** GET /api/v1/auth/brands */
-  brands: asyncHandler(async (_req, res) => {
-    const brands = await AuthService.listPublicBrands();
-    return ok(res, { brands });
-  }),
+const signupBrands = asyncHandler(async (_req, res) => {
+  const data = await AuthService.listBrandsForSignup();
+  res.json({ status: "success", data });
+});
+
+const session = asyncHandler(async (req, res) => {
+  const data = await AuthService.getAuthSessionSnapshot(req.user.id);
+  res.json({ status: "success", data });
+});
+
+async function login(req, res, next) {
+  const { email, password } = req.body;
+  if (!email || !password) return next(new ApiError(400, "email et password requis"));
+  const data = await AuthService.login({ email: String(email), password: String(password) });
+  res.json({ status: "success", data });
+}
+
+function logout(_req, res) {
+  res.json({ status: "success", message: "Déconnecté (client doit supprimer le token)" });
+}
+
+module.exports = {
+  register: asyncHandler(register),
+  signupBrands,
+  session,
+  login: asyncHandler(login),
+  logout,
 };
-
-module.exports = AuthController;

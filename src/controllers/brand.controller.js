@@ -1,193 +1,126 @@
 const BrandService = require("../services/brand.service");
-const { brandIdParamSchema, getBrandsQuerySchema } = require("../validations/brand.validation");
-const ApiError = require("../utils/ApiError");
+const asyncHandler = require("../utils/asyncHandler");
+const { requirePositiveIntParam } = require("../utils/paramId");
 
-/**
- * Parse et valide l'ID du paramètre d'URL.
- */
-function parseBrandId(params) {
-    const result = brandIdParamSchema.safeParse(params);
-    if (!result.success) {
-        const fieldErrors = result.error.flatten().fieldErrors;
-        throw new ApiError(400, fieldErrors.id?.[0] || "ID brand invalide");
-    }
-    return result.data.id;
-}
+const dashboard = asyncHandler(async (req, res) => {
+  const data = await BrandService.getDashboard(req.user.id);
+  res.json({ status: "success", data });
+});
 
-/**
- * BrandController — Couche contrôleur pour la gestion des brands.
- * Admin CRUD + Brand self-service.
- */
-const BrandController = {
-    // ═══════════════════════════════════════════════════════
-    // ADMIN CRUD
-    // ═══════════════════════════════════════════════════════
+const quizmasters = asyncHandler(async (req, res) => {
+  const data = await BrandService.listQuizmasters(req.user.id);
+  res.json({ status: "success", data });
+});
 
-    /**
-     * POST /api/v1/admin/brands
-     */
-    async create(req, res, next) {
-        try {
-            const brand = await BrandService.create(req.body);
-            res.status(201).json({
-                status: "success",
-                message: "Brand créé avec succès",
-                data: { brand },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const approveQm = asyncHandler(async (req, res) => {
+  await BrandService.approveQuizmaster(
+    req.user.id,
+    requirePositiveIntParam(req.params.id, "Quizmaster"),
+  );
+  res.json({ status: "success" });
+});
 
-    /**
-     * GET /api/v1/admin/brands
-     */
-    async getAll(req, res, next) {
-        try {
-            const result = getBrandsQuerySchema.safeParse(req.query);
-            if (!result.success) {
-                const fieldErrors = result.error.flatten().fieldErrors;
-                const messages = Object.entries(fieldErrors)
-                    .map(([field, errors]) => `${field}: ${errors[0]}`)
-                    .join("; ");
-                return next(new ApiError(400, messages || "Paramètres invalides"));
-            }
+const rejectQm = asyncHandler(async (req, res) => {
+  await BrandService.rejectQuizmaster(
+    req.user.id,
+    requirePositiveIntParam(req.params.id, "Quizmaster"),
+  );
+  res.json({ status: "success" });
+});
 
-            const data = await BrandService.getAll(result.data);
+const blockQm = asyncHandler(async (req, res) => {
+  await BrandService.blockQuizmaster(req.user.id, requirePositiveIntParam(req.params.id, "Quizmaster"));
+  res.json({ status: "success" });
+});
 
-            res.status(200).json({
-                status: "success",
-                message: `${data.total} brand(s) trouvé(s)`,
-                data,
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const unblockQm = asyncHandler(async (req, res) => {
+  await BrandService.unblockQuizmaster(req.user.id, requirePositiveIntParam(req.params.id, "Quizmaster"));
+  res.json({ status: "success" });
+});
 
-    /**
-     * GET /api/v1/admin/brands/:id
-     */
-    async getById(req, res, next) {
-        try {
-            const id = parseBrandId(req.params);
-            const brand = await BrandService.getById(id);
+const deleteQm = asyncHandler(async (req, res) => {
+  await BrandService.deleteQuizmaster(req.user.id, requirePositiveIntParam(req.params.id, "Quizmaster"));
+  res.json({ status: "success" });
+});
 
-            res.status(200).json({
-                status: "success",
-                data: { brand },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const quizzes = asyncHandler(async (req, res) => {
+  const data = await BrandService.listQuizzes(req.user.id);
+  res.json({ status: "success", data });
+});
 
-    /**
-     * PUT /api/v1/admin/brands/:id
-     */
-    async update(req, res, next) {
-        try {
-            const id = parseBrandId(req.params);
-            const brand = await BrandService.update(id, req.body);
+const activateQuiz = asyncHandler(async (req, res) => {
+  await BrandService.setQuizActive(req.user.id, requirePositiveIntParam(req.params.id, "Quiz"), true);
+  res.json({ status: "success" });
+});
 
-            res.status(200).json({
-                status: "success",
-                message: "Brand mis à jour avec succès",
-                data: { brand },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const deactivateQuiz = asyncHandler(async (req, res) => {
+  await BrandService.setQuizActive(req.user.id, requirePositiveIntParam(req.params.id, "Quiz"), false);
+  res.json({ status: "success" });
+});
 
-    /**
-     * DELETE /api/v1/admin/brands/:id
-     */
-    async delete(req, res, next) {
-        try {
-            const id = parseBrandId(req.params);
-            const deleted = await BrandService.delete(id);
+const deleteQuiz = asyncHandler(async (req, res) => {
+  await BrandService.deleteQuiz(req.user.id, requirePositiveIntParam(req.params.id, "Quiz"));
+  res.json({ status: "success" });
+});
 
-            res.status(200).json({
-                status: "success",
-                message: `Brand ${deleted.email} supprimé avec succès`,
-                data: { id: deleted.id },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const subscription = asyncHandler(async (req, res) => {
+  const data = await BrandService.getSubscription(req.user.id);
+  res.json({ status: "success", data });
+});
 
-    // ═══════════════════════════════════════════════════════
-    // BRAND SELF-SERVICE
-    // ═══════════════════════════════════════════════════════
+const billing = asyncHandler(async (req, res) => {
+  const data = await BrandService.getBilling(req.user.id);
+  res.json({ status: "success", data });
+});
 
-    /**
-     * GET /api/v1/brand/me
-     */
-    async getProfile(req, res, next) {
-        try {
-            const brand = await BrandService.getProfile(req.user.id);
+const products = asyncHandler(async (req, res) => {
+  const data = await BrandService.listBrandProducts(req.user.id);
+  res.json({ status: "success", data });
+});
 
-            res.status(200).json({
-                status: "success",
-                data: { brand },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const createProduct = asyncHandler(async (req, res) => {
+  const body = { ...(typeof req.body === "object" && req.body ? req.body : {}) };
+  if (req.file) body.image = `/uploads/products/${req.file.filename}`;
+  const row = await BrandService.createProduct(req.user.id, body);
+  res.status(201).json({ status: "success", data: row });
+});
 
-    /**
-     * PUT /api/v1/brand/me
-     */
-    async updateProfile(req, res, next) {
-        try {
-            const brand = await BrandService.updateProfile(req.user.id, req.body);
+const updateProduct = asyncHandler(async (req, res) => {
+  const body = { ...(typeof req.body === "object" && req.body ? req.body : {}) };
+  if (req.file) body.image = `/uploads/products/${req.file.filename}`;
+  else if (body.removeImage === "true" || body.removeImage === true) {
+    body.image = "";
+  }
+  delete body.removeImage;
+  const row = await BrandService.updateProduct(
+    req.user.id,
+    requirePositiveIntParam(req.params.id, "Produit"),
+    body,
+  );
+  res.json({ status: "success", data: row });
+});
 
-            res.status(200).json({
-                status: "success",
-                message: "Profil mis à jour avec succès",
-                data: { brand },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+const deleteProduct = asyncHandler(async (req, res) => {
+  await BrandService.deleteProduct(req.user.id, requirePositiveIntParam(req.params.id, "Produit"));
+  res.json({ status: "success" });
+});
 
-    /**
-     * GET /api/v1/brand/quizmasters
-     */
-    async getQuizmasters(req, res, next) {
-        try {
-            const quizmasters = await BrandService.getQuizmasters(req.user.id);
-
-            res.status(200).json({
-                status: "success",
-                message: `${quizmasters.length} quizmaster(s) trouvé(s)`,
-                data: { quizmasters },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
-
-    /**
-     * GET /api/v1/brand/quizzes
-     */
-    async getQuizzes(req, res, next) {
-        try {
-            const quizzes = await BrandService.getQuizzes(req.user.id);
-
-            res.status(200).json({
-                status: "success",
-                message: `${quizzes.length} quiz(zes) trouvé(s)`,
-                data: { quizzes },
-            });
-        } catch (err) {
-            next(err);
-        }
-    },
+module.exports = {
+  dashboard,
+  subscription,
+  billing,
+  quizmasters,
+  approveQm,
+  rejectQm,
+  blockQm,
+  unblockQm,
+  deleteQm,
+  quizzes,
+  activateQuiz,
+  deactivateQuiz,
+  deleteQuiz,
+  products,
+  createProduct,
+  updateProduct,
+  deleteProduct,
 };
-
-module.exports = BrandController;

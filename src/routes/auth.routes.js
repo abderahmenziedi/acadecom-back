@@ -1,21 +1,12 @@
 const express = require("express");
 const router = express.Router();
-const AuthController = require("../controllers/authController");
-const validate = require("../middlewares/validate");
-const auth = require("../middlewares/auth");
-const { registerSchema, loginSchema } = require("../validations/authValidation");
+const AuthController = require("../controllers/auth.controller");
+const auth = require("../middlewares/auth.middleware");
 
-/**
- * Routes d'authentification.
- *
- * POST /api/v1/auth/register     - Inscription (participant, brand, quizmaster)
- * POST /api/v1/auth/login        - Connexion (tous les rôles)
- * POST /api/v1/auth/logout       - Déconnexion (utilisateurs authentifiés uniquement)
- * GET  /api/v1/auth/brands       - Liste publique des brands (pour inscription quizmaster)
- */
-router.post("/register", validate(registerSchema), AuthController.register);
-router.post("/login", validate(loginSchema), AuthController.login);
+router.get("/signup/brands", AuthController.signupBrands);
+router.post("/register", AuthController.register);
+router.post("/login", AuthController.login);
+router.get("/session", auth, AuthController.session);
 router.post("/logout", auth, AuthController.logout);
-router.get("/brands", AuthController.getBrands);
 
 module.exports = router;

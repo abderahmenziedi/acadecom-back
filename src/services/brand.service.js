@@ -1,326 +1,387 @@
-const prisma = require("../config/prisma");
-const bcrypt = require("bcrypt");
+const prisma = require("../prisma/client");
 const ApiError = require("../utils/ApiError");
+const { unlinkStoredProductImage } = require("../utils/productFiles");
+const BrandPlanService = require("./brandPlan.service");
+const SubscriptionLifecycle = require("./subscriptionLifecycle.service");
 
-/**
- * Champs retournés pour un brand (jamais le mot de passe).
- */
-const brandSelect = {
-    id: true,
-    name: true,
-    email: true,
-    role: true,
-    industry: true,
-    description: true,
-    isBlocked: true,
-    createdAt: true,
-    _count: { select: { quizmasters: true } },
+async function resolveBrand(userId) {
+  const brand = await prisma.brand.findUnique({ where: { userId } });
+  if (!brand) throw new ApiError(403, "Compte brand introuvable");
+  return brand;
+}
+
+async function getSubscription(userId) {
+  const brand = await resolveBrand(userId);
+  return BrandPlanService.getSubscriptionOverview(brand);
+}
+
+async function getBilling(userId) {
+  const brand = await resolveBrand(userId);
+  const now = new Date();
+  const win = await SubscriptionLifecycle.getActivePaidWindow(prisma, brand.id, now);
+
+  let daysRemaining = null;
+  let paidWindowEndsAt = null;
+  if (win && win.endDate.getTime() >= now.getTime()) {
+    paidWindowEndsAt = win.endDate.toISOString();
+    daysRemaining = Math.ceil((win.endDate.getTime() - now.getTime()) / 86400000);
+    if (!Number.isFinite(daysRemaining)) daysRemaining = null;
+    else daysRemaining = Math.max(0, daysRemaining);
+  }
+
+  const baseOv = await BrandPlanService.getSubscriptionOverview(brand);
+
+  const cycles = await prisma.brandSubscriptionCycle.findMany({
+    where: { brandId: brand.id },
+    orderBy: { id: "desc" },
+    select: {
+      id: true,
+      planType: true,
+      lifecycle: true,
+      paymentDate: true,
+      startDate: true,
+      endDate: true,
+      amountMinor: true,
+      currency: true,
+      stripeCheckoutSessionId: true,
+    },
+  });
+
+  const overview = {
+    ...baseOv,
+    paidWindowEndsAt,
+    paidOn: win?.paymentDate ? win.paymentDate.toISOString() : null,
+    daysRemaining,
+    currentPaidCyclePlan: win?.planType ?? null,
+    subscriptionPackDays: SubscriptionLifecycle.packDurationDays(),
+    timeRemainingLabel:
+      baseOv.effectivePlanType === "FREE" || paidWindowEndsAt == null
+        ? "—"
+        : daysRemaining === 0
+          ? "expire aujourd'hui"
+          : `${daysRemaining} jour(s) restant(s)`,
+  };
+
+  return { overview, cycles };
+}
+
+async function getDashboard(userId) {
+  const brand = await resolveBrand(userId);
+  const [quizmasters, quizzes, products] = await Promise.all([
+    prisma.quizmaster.count({ where: { brandId: brand.id } }),
+    prisma.quiz.count({ where: { brandId: brand.id } }),
+    prisma.product.count({ where: { brandId: brand.id } }),
+  ]);
+  return { brandId: brand.id, quizmasters, quizzes, products };
+}
+
+async function listQuizmasters(userId) {
+  const brand = await resolveBrand(userId);
+  const qms = await prisma.quizmaster.findMany({
+    where: { brandId: brand.id },
+    include: {
+      user: { select: { id: true, email: true, name: true, isBlocked: true } },
+      _count: { select: { quizzes: true } },
+    },
+  });
+  return qms.map((qm) => ({
+    id: qm.id,
+    userId: qm.user.id,
+    email: qm.user.email,
+    name: qm.user.name,
+    isBlocked: qm.user.isBlocked,
+    approvalStatus: qm.approvalStatus,
+    quizCount: qm._count.quizzes,
+  }));
+}
+
+async function approveQuizmaster(brandUserId, quizmasterId) {
+  const brand = await resolveBrand(brandUserId);
+  const qm = await prisma.quizmaster.findFirst({
+    where: { id: quizmasterId, brandId: brand.id },
+  });
+  if (!qm) throw new ApiError(404, "Quizmaster introuvable");
+  if (qm.approvalStatus === "ACTIVE") return;
+  if (qm.approvalStatus !== "PENDING") {
+    throw new ApiError(400, "Seules les demandes en attente peuvent être activées.");
+  }
+
+  await BrandPlanService.assertCanIncreaseActiveQuizmasters(brand.id);
+
+  await prisma.quizmaster.update({
+    where: { id: qm.id },
+    data: { approvalStatus: "ACTIVE" },
+  });
+
+  await prisma.notification
+    .create({
+      data: {
+        userId: qm.userId,
+        type: "quizmaster_approved",
+        message: `Votre compte quizmaster a été accepté — vous pouvez accéder à votre espace et créer des quiz.`,
+      },
+    })
+    .catch(() => {});
+}
+
+async function rejectQuizmaster(brandUserId, quizmasterId) {
+  const brand = await resolveBrand(brandUserId);
+  const qm = await prisma.quizmaster.findFirst({
+    where: { id: quizmasterId, brandId: brand.id },
+  });
+  if (!qm) throw new ApiError(404, "Quizmaster introuvable");
+  if (qm.approvalStatus !== "PENDING") {
+    throw new ApiError(400, "Seules les demandes en attente peuvent être refusées.");
+  }
+  await prisma.quizmaster.update({
+    where: { id: qm.id },
+    data: { approvalStatus: "REJECTED" },
+  });
+  await prisma.notification
+    .create({
+      data: {
+        userId: qm.userId,
+        type: "quizmaster_rejected",
+        message: `Votre demande quizmaster a été refusée par la marque.`,
+      },
+    })
+    .catch(() => {});
+}
+
+async function blockQuizmaster(brandUserId, quizmasterId) {
+  const brand = await resolveBrand(brandUserId);
+  const qm = await prisma.quizmaster.findFirst({
+    where: { id: quizmasterId, brandId: brand.id },
+    include: { user: true },
+  });
+  if (!qm) throw new ApiError(404, "Quizmaster introuvable");
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: qm.userId }, data: { isBlocked: true } });
+    await tx.quiz.updateMany({
+      where: { quizmasterId: qm.id },
+      data: { isActive: false },
+    });
+  });
+  await prisma.notification
+    .create({
+      data: {
+        userId: qm.userId,
+        type: "account_blocked",
+        message: "Votre compte quizmaster a été suspendu par la marque.",
+      },
+    })
+    .catch(() => {});
+}
+
+async function unblockQuizmaster(brandUserId, quizmasterId) {
+  const brand = await resolveBrand(brandUserId);
+  const qm = await prisma.quizmaster.findFirst({
+    where: { id: quizmasterId, brandId: brand.id },
+    include: { user: { select: { isBlocked: true } } },
+  });
+  if (!qm) throw new ApiError(404, "Quizmaster introuvable");
+  if (qm.user.isBlocked) {
+    await BrandPlanService.assertCanIncreaseActiveQuizmasters(brand.id);
+  }
+  await prisma.user.update({
+    where: { id: qm.userId },
+    data: { isBlocked: false },
+  });
+}
+
+async function deleteQuizmaster(brandUserId, quizmasterId) {
+  const brand = await resolveBrand(brandUserId);
+  const qm = await prisma.quizmaster.findFirst({
+    where: { id: quizmasterId, brandId: brand.id },
+  });
+  if (!qm) throw new ApiError(404, "Quizmaster introuvable");
+  await prisma.user.delete({ where: { id: qm.userId } });
+}
+
+async function listQuizzes(brandUserId) {
+  const brand = await resolveBrand(brandUserId);
+  return prisma.quiz.findMany({
+    where: { brandId: brand.id },
+    orderBy: { id: "desc" },
+    include: {
+      quizmaster: { include: { user: { select: { name: true, email: true } } } },
+      _count: { select: { questions: true, sessions: true } },
+    },
+  });
+}
+
+async function setQuizActive(brandUserId, quizId, isActive) {
+  const brand = await resolveBrand(brandUserId);
+  const quiz = await prisma.quiz.findFirst({
+    where: { id: quizId, brandId: brand.id },
+  });
+  if (!quiz) throw new ApiError(404, "Quiz introuvable");
+  await BrandPlanService.assertActiveQuizBudget(brand.id, {
+    wasActive: quiz.isActive,
+    willBeActive: isActive,
+  });
+  return prisma.quiz.update({
+    where: { id: quizId },
+    data: { isActive },
+  });
+}
+
+async function deleteQuiz(brandUserId, quizId) {
+  const brand = await resolveBrand(brandUserId);
+  const quiz = await prisma.quiz.findFirst({
+    where: { id: quizId, brandId: brand.id },
+  });
+  if (!quiz) throw new ApiError(404, "Quiz introuvable");
+  await prisma.quiz.delete({ where: { id: quizId } });
+}
+
+async function listBrandProducts(userId) {
+  const brand = await resolveBrand(userId);
+  return prisma.product.findMany({ where: { brandId: brand.id }, orderBy: { id: "desc" } });
+}
+
+function parseOptionalDescription(raw) {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const d = String(raw).trim();
+  if (!d) return null;
+  if (d.length > 8000) throw new ApiError(400, "Description trop longue (8000 caractères max)");
+  return d;
+}
+
+function parseProductCreatePayload(data) {
+  if (!data || typeof data !== "object") throw new ApiError(400, "Données invalides");
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  if (!name) throw new ApiError(400, "Nom du produit requis");
+
+  const couponPrice = Number(data.couponPrice);
+  if (!Number.isInteger(couponPrice) || couponPrice < 1) {
+    throw new ApiError(400, "Prix en coupons invalide (entier ≥ 1)");
+  }
+
+  let stock = data.stock;
+  if (stock === undefined || stock === null || stock === "") stock = 0;
+  else {
+    stock = Number(stock);
+    if (!Number.isInteger(stock) || stock < 0) throw new ApiError(400, "Stock invalide");
+  }
+
+  const boolActive = parseOptionalBool(data.isActive);
+
+  return {
+    name,
+    description: parseOptionalDescription(data.description),
+    couponPrice,
+    stock,
+    image: typeof data.image === "string" ? data.image.trim() || null : data.image ?? null,
+    isActive: boolActive !== undefined ? boolActive : true,
+  };
+}
+
+function parseOptionalCouponPrice(v) {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw new ApiError(400, "Prix en coupons invalide (entier ≥ 1)");
+  return n;
+}
+
+function parseOptionalStock(v) {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0) throw new ApiError(400, "Stock invalide");
+  return n;
+}
+
+function parseOptionalBool(raw) {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw === "boolean") return raw;
+  const s = String(raw).trim().toLowerCase();
+  if (s === "true" || s === "1" || s === "on") return true;
+  if (s === "false" || s === "0") return false;
+  throw new ApiError(400, "Champ booléen invalide");
+}
+
+async function createProduct(userId, data) {
+  const brand = await resolveBrand(userId);
+  const parsed = parseProductCreatePayload(data);
+  return prisma.product.create({
+    data: {
+      brandId: brand.id,
+      name: parsed.name,
+      description: parsed.description,
+      couponPrice: parsed.couponPrice,
+      stock: parsed.stock,
+      image: parsed.image,
+      isActive: parsed.isActive,
+    },
+  });
+}
+
+async function updateProduct(userId, productId, data) {
+  const brand = await resolveBrand(userId);
+  const p = await prisma.product.findFirst({ where: { id: productId, brandId: brand.id } });
+  if (!p) throw new ApiError(404, "Produit introuvable");
+  const couponPrice = parseOptionalCouponPrice(data?.couponPrice);
+  const stock = parseOptionalStock(data?.stock);
+  const isActive = parseOptionalBool(data?.isActive);
+  const patch = {};
+  if (data.name != null) {
+    const trimmed = String(data.name).trim();
+    if (!trimmed) throw new ApiError(400, "Nom du produit requis");
+    patch.name = trimmed;
+  }
+  if (data.description !== undefined) {
+    patch.description = parseOptionalDescription(data.description);
+  }
+  const prevImage = p.image;
+  const imageChanging = data.image !== undefined;
+  const nextImage = imageChanging
+    ? typeof data.image === "string"
+      ? data.image.trim() || null
+      : data.image
+    : undefined;
+
+  const updated = await prisma.product.update({
+    where: { id: productId },
+    data: {
+      ...patch,
+      ...(couponPrice !== undefined && { couponPrice }),
+      ...(stock !== undefined && { stock }),
+      ...(imageChanging && { image: nextImage }),
+      ...(isActive !== undefined && { isActive }),
+    },
+  });
+
+  if (imageChanging && prevImage && prevImage !== updated.image) {
+    await unlinkStoredProductImage(prevImage);
+  }
+
+  return updated;
+}
+
+async function deleteProduct(userId, productId) {
+  const brand = await resolveBrand(userId);
+  const p = await prisma.product.findFirst({ where: { id: productId, brandId: brand.id } });
+  if (!p) throw new ApiError(404, "Produit introuvable");
+  await unlinkStoredProductImage(p.image);
+  await prisma.product.delete({ where: { id: productId } });
+}
+
+module.exports = {
+  resolveBrand,
+  getDashboard,
+  getSubscription,
+  getBilling,
+  listQuizmasters,
+  approveQuizmaster,
+  rejectQuizmaster,
+  blockQuizmaster,
+  unblockQuizmaster,
+  deleteQuizmaster,
+  listQuizzes,
+  setQuizActive,
+  deleteQuiz,
+  listBrandProducts,
+  createProduct,
+  updateProduct,
+  deleteProduct,
 };
-
-/**
- * BrandService — Logique métier pour la gestion des brands.
- * Admin CRUD + Brand self-service.
- */
-const BrandService = {
-    // ═══════════════════════════════════════════════════════
-    // ADMIN CRUD
-    // ═══════════════════════════════════════════════════════
-
-    /**
-     * Crée un nouvel utilisateur avec le rôle "brand".
-     */
-    async create({ name, email, password, industry, description }) {
-        const existing = await prisma.user.findUnique({ where: { email } });
-        if (existing) {
-            throw new ApiError(409, "Cet email est déjà utilisé");
-        }
-
-        const hashed = await bcrypt.hash(password, 10);
-
-        const brand = await prisma.user.create({
-            data: {
-                name,
-                email,
-                password: hashed,
-                role: "brand",
-                industry: industry || null,
-                description: description || null,
-            },
-            select: brandSelect,
-        });
-
-        return brand;
-    },
-
-    /**
-     * Récupère la liste paginée de tous les brands avec filtres.
-     */
-    async getAll({ page = 1, limit = 10, industry, search }) {
-        const where = { role: "brand" };
-
-        if (industry) {
-            where.industry = { contains: industry };
-        }
-        if (search) {
-            where.OR = [
-                { name: { contains: search } },
-                { email: { contains: search } },
-            ];
-        }
-
-        const skip = (page - 1) * limit;
-
-        const [brands, total] = await prisma.$transaction([
-            prisma.user.findMany({
-                where,
-                skip,
-                take: limit,
-                orderBy: { createdAt: "desc" },
-                select: brandSelect,
-            }),
-            prisma.user.count({ where }),
-        ]);
-
-        return {
-            brands,
-            total,
-            page,
-            totalPages: Math.ceil(total / limit),
-        };
-    },
-
-    /**
-     * Récupère un brand par son ID (avec ses quizmasters).
-     */
-    async getById(id) {
-        const brand = await prisma.user.findUnique({
-            where: { id },
-            select: {
-                ...brandSelect,
-                quizmasters: {
-                    select: { id: true, name: true, email: true, createdAt: true },
-                },
-            },
-        });
-
-        if (!brand || brand.role !== "brand") {
-            throw new ApiError(404, `Brand avec ID ${id} introuvable`);
-        }
-
-        return brand;
-    },
-
-    /**
-     * Met à jour un brand existant (admin — tous les champs).
-     */
-    async update(id, data) {
-        const brand = await prisma.user.findUnique({
-            where: { id },
-            select: { id: true, role: true },
-        });
-
-        if (!brand || brand.role !== "brand") {
-            throw new ApiError(404, `Brand avec ID ${id} introuvable`);
-        }
-
-        if (data.email) {
-            const existing = await prisma.user.findUnique({ where: { email: data.email } });
-            if (existing && existing.id !== id) {
-                throw new ApiError(409, "Cet email est déjà utilisé par un autre utilisateur");
-            }
-        }
-
-        if (data.password) {
-            data.password = await bcrypt.hash(data.password, 10);
-        }
-
-        const updated = await prisma.user.update({
-            where: { id },
-            data,
-            select: brandSelect,
-        });
-
-        return updated;
-    },
-
-    /**
-     * Supprime un brand avec cascade contrôlée :
-     * - Supprime les quizzes liés à cette brand (cascade: questions, options, attempts, answers)
-     * - Supprime les produits liés à cette brand
-     * - Détache les quizmasters (brandId = null) — ils ne sont PAS supprimés
-     * - Supprime les notifications du brand
-     * - Supprime le brand
-     */
-    async delete(id) {
-        const brand = await prisma.user.findUnique({
-            where: { id },
-            select: {
-                id: true,
-                role: true,
-                email: true,
-            },
-        });
-
-        if (!brand || brand.role !== "brand") {
-            throw new ApiError(404, `Brand avec ID ${id} introuvable`);
-        }
-
-        // 1. Récupérer les quizzes de cette brand
-        const quizIds = (await prisma.quiz.findMany({
-            where: { brandId: id },
-            select: { id: true },
-        })).map(q => q.id);
-
-        if (quizIds.length > 0) {
-            // Supprimer les answers liés aux attempts de ces quizzes
-            await prisma.answer.deleteMany({ where: { attempt: { quizId: { in: quizIds } } } });
-            // Supprimer les pointsHistory liés aux attempts de ces quizzes
-            const attemptIds = (await prisma.attempt.findMany({ where: { quizId: { in: quizIds } }, select: { id: true } })).map(a => a.id);
-            if (attemptIds.length > 0) {
-                await prisma.pointsHistory.deleteMany({ where: { attemptId: { in: attemptIds } } });
-            }
-            // Supprimer les attempts
-            await prisma.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
-            // Supprimer les options puis les questions
-            await prisma.option.deleteMany({ where: { question: { quizId: { in: quizIds } } } });
-            await prisma.question.deleteMany({ where: { quizId: { in: quizIds } } });
-            // Supprimer les quizzes
-            await prisma.quiz.deleteMany({ where: { id: { in: quizIds } } });
-        }
-
-        // 2. Supprimer les produits de cette brand (SetNull sur OrderItem.productId)
-        await prisma.product.deleteMany({ where: { brandId: id } });
-
-        // 3. Détacher les quizmasters (brandId = null) — ils restent en base
-        await prisma.user.updateMany({
-            where: { brandId: id, role: "quizmaster" },
-            data: { brandId: null },
-        });
-
-        // 4. Supprimer les notifications du brand
-        await prisma.notification.deleteMany({ where: { userId: id } });
-
-        // 5. Supprimer le brand
-        await prisma.user.delete({ where: { id } });
-
-        return { id, email: brand.email };
-    },
-
-    // ═══════════════════════════════════════════════════════
-    // BRAND SELF-SERVICE
-    // ═══════════════════════════════════════════════════════
-
-    /**
-     * Récupère le profil du brand connecté (dashboard info).
-     */
-    async getProfile(brandId) {
-        const brand = await prisma.user.findUnique({
-            where: { id: brandId },
-            select: {
-                ...brandSelect,
-                quizmasters: {
-                    select: {
-                        id: true,
-                        name: true,
-                        email: true,
-                        createdAt: true,
-                        _count: { select: { quizzes: true } },
-                    },
-                },
-            },
-        });
-
-        if (!brand || brand.role !== "brand") {
-            throw new ApiError(404, "Profil brand introuvable");
-        }
-
-        return brand;
-    },
-
-    /**
-     * Met à jour le profil du brand (champs limités : name, industry, description).
-     */
-    async updateProfile(brandId, data) {
-        const brand = await prisma.user.findUnique({
-            where: { id: brandId },
-            select: { id: true, role: true },
-        });
-
-        if (!brand || brand.role !== "brand") {
-            throw new ApiError(404, "Profil brand introuvable");
-        }
-
-        const updated = await prisma.user.update({
-            where: { id: brandId },
-            data,
-            select: brandSelect,
-        });
-
-        return updated;
-    },
-
-    /**
-     * Récupère les quizmasters liés à ce brand.
-     */
-    async getQuizmasters(brandId) {
-        const brand = await prisma.user.findUnique({
-            where: { id: brandId },
-            select: { id: true, role: true },
-        });
-
-        if (!brand || brand.role !== "brand") {
-            throw new ApiError(404, "Brand introuvable");
-        }
-
-        const quizmasters = await prisma.user.findMany({
-            where: { brandId, role: "quizmaster" },
-            select: {
-                id: true,
-                name: true,
-                email: true,
-                createdAt: true,
-                _count: { select: { quizzes: true } },
-            },
-            orderBy: { createdAt: "desc" },
-        });
-
-        return quizmasters;
-    },
-
-    /**
-     * Récupère les quizzes liés à ce brand (via ses quizmasters).
-     */
-    async getQuizzes(brandId) {
-        const brand = await prisma.user.findUnique({
-            where: { id: brandId },
-            select: { id: true, role: true },
-        });
-
-        if (!brand || brand.role !== "brand") {
-            throw new ApiError(404, "Brand introuvable");
-        }
-
-        const quizzes = await prisma.quiz.findMany({
-            where: { brandId },
-            select: {
-                id: true,
-                title: true,
-                description: true,
-                isActive: true,
-                timeLimit: true,
-                pointsPerQuestion: true,
-                createdAt: true,
-                updatedAt: true,
-                quizmaster: {
-                    select: { id: true, name: true, email: true },
-                },
-                _count: { select: { questions: true, attempts: true } },
-            },
-            orderBy: { createdAt: "desc" },
-        });
-
-        return quizzes;
-    },
-};
-
-module.exports = BrandService;

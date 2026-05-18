@@ -1,7 +1,3 @@
-// ═══════════════════════════════════════════════════════════════
-// AcadeCom — Prisma Schema v2.1 (Production-Ready)
-// ═══════════════════════════════════════════════════════════════
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,19 +7,289 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── Enums ──────────────────────────────────────────────────────
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String
+  name      String
+  avatar    String?
+  role      Role      @default(participant)
+  isBlocked Boolean   @default(false)
+  createdAt DateTime  @default(now())
 
-enum Role {
-  participant
-  brand
-  quizmaster
-  admin
+  admin         Admin?
+  brand         Brand?
+  quizmaster    Quizmaster?
+  participant   Participant?
+  notifications Notification[]
 }
 
-enum Difficulty {
-  easy
-  medium
-  hard
+enum Role {
+  admin
+  brand
+  quizmaster
+  participant
+}
+
+enum QuizmasterApprovalStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+}
+
+model Admin {
+  id     Int  @id @default(autoincrement())
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum BrandPlanType {
+  FREE
+  PRO
+  PRO_PLUS
+}
+
+enum BrandSubscriptionStatus {
+  ACTIVE
+  PENDING_PAYMENT
+  EXPIRED
+}
+
+/** Cycle payant ou historique (upgrade / downgrade / renouvellement). */
+enum BillingCycleLifecycle {
+  ACTIVE
+  EXPIRED
+  SUPERSEDED
+}
+
+model Brand {
+  id          Int     @id @default(autoincrement())
+  userId      Int     @unique
+  industry    String?
+  description String?
+  logoUrl     String?
+  planType              BrandPlanType           @default(FREE)
+  subscriptionStatus    BrandSubscriptionStatus  @default(ACTIVE)
+  stripeCustomerId      String?
+
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  quizmasters Quizmaster[]
+  quizzes     Quiz[]
+  products    Product[]
+  subscriptions BrandSubscriptionCycle[]
+}
+
+/** Historique et cycle courant pour les packs PRO / PRO_PLUS (paiement Stripe ou mode démo). */
+model BrandSubscriptionCycle {
+  id                Int                     @id @default(autoincrement())
+  brandId           Int
+  planType          BrandPlanType
+  lifecycle         BillingCycleLifecycle   @default(ACTIVE)
+  paymentDate       DateTime
+  startDate         DateTime
+  endDate           DateTime
+  amountMinor       Int                     @default(0)
+  currency          String                  @default("tnd")
+
+  stripeCheckoutSessionId String?             @unique
+  stripePaymentIntentId   String?
+  expiryWarnedAt          DateTime?
+
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([brandId])
+  @@index([brandId, lifecycle])
+  @@map("brand_subscriptions")
+}
+
+model Quizmaster {
+  id               Int       @id @default(autoincrement())
+  userId           Int       @unique
+  brandId          Int
+  approvalStatus   QuizmasterApprovalStatus @default(PENDING)
+  phoneE164        String?
+  gender           String?
+  birthDate        DateTime? @db.Date
+  profilePhotoUrl  String?
+  isProfileComplete Boolean  @default(false)
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brand            Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  quizzes Quiz[]
+
+  @@index([brandId, approvalStatus])
+}
+
+model Participant {
+  id               Int       @id @default(autoincrement())
+  userId           Int       @unique
+  xp               Int       @default(0)
+  coupons          Int       @default(0)
+  totalPoints      Int       @default(0)
+  xpRankId         Int       @default(1)
+  phoneE164        String?
+  gender             String?
+  birthDate          DateTime? @db.Date
+  country            String?
+  city               String?
+  profilePhotoUrl    String?
+  isProfileComplete  Boolean   @default(false)
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  xpRank             XpRank    @relation(fields: [xpRankId], references: [id])
+
+  sessions     GameSession[]
+  orders       Order[]
+  preAnswers   PreAnswer[]
+  quizAttempts ParticipantQuizAttempt[]
+}
+
+model XpRank {
+  id     Int    @id @default(autoincrement())
+  label  String
+  minXp  Int
+  maxXp  Int
+  icon   String
+
+  participants Participant[]
+}
+
+model Quiz {
+  id               Int @id @default(autoincrement())
+  brandId          Int
+  quizmasterId     Int
+  title            String
+  category         String?
+  image            String?
+  maxCoupons       Int     @default(10)
+  isActive         Boolean @default(false)
+  durationSeconds  Int     @default(300)
+  passingScore     Float   @default(0.5)
+  randomizeQuestions Boolean @default(false)
+  shuffleOptions     Boolean @default(false)
+  hasPreQuestions    Boolean   @default(false)
+  createdAt        DateTime @default(now())
+
+  brand         Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  quizmaster    Quizmaster    @relation(fields: [quizmasterId], references: [id], onDelete: Cascade)
+  questions     Question[]
+  preQuestions  PreQuestion[]
+  sessions      GameSession[]
+  quizAttempts  ParticipantQuizAttempt[]
+}
+
+/** Une entrée = le participant a engagé sa tentative unique (dès le clic « Jouer » / début du flux). */
+model ParticipantQuizAttempt {
+  id            Int      @id @default(autoincrement())
+  participantId Int
+  quizId        Int
+  createdAt     DateTime @default(now())
+
+  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  quiz        Quiz        @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@unique([participantId, quizId])
+  @@index([quizId])
+}
+
+model PreQuestion {
+  id           Int    @id @default(autoincrement())
+  quizId       Int
+  questionText String @db.Text
+  sortOrder    Int    @default(0)
+  quiz         Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  answers      PreAnswer[]
+
+  @@index([quizId])
+}
+
+model PreAnswer {
+  id             Int      @id @default(autoincrement())
+  preQuestionId  Int
+  participantId  Int
+  answerText     String   @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  preQuestion PreQuestion @relation(fields: [preQuestionId], references: [id], onDelete: Cascade)
+  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([preQuestionId, participantId])
+}
+
+model Question {
+  id         Int     @id @default(autoincrement())
+  quizId     Int
+  text       String  @db.Text
+  xpReward   Int     @default(10)
+  hint       String?
+
+  quiz    Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  options Option[]
+  answers Answer[]
+}
+
+model Option {
+  id         Int    @id @default(autoincrement())
+  questionId Int
+  text       String @db.VarChar(500)
+  isCorrect  Boolean @default(false)
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+model GameSession {
+  id              Int @id @default(autoincrement())
+  participantId   Int
+  quizId          Int
+  scorePercent    Float   @default(0)
+  xpEarned        Int     @default(0)
+  couponsEarned   Int     @default(0)
+  passed          Boolean @default(false)
+  durationSeconds Int     @default(0)
+  playedAt        DateTime @default(now())
+
+  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  quiz        Quiz        @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  answers     Answer[]
+
+  @@unique([participantId, quizId])
+}
+
+model Answer {
+  id                Int @id @default(autoincrement())
+  sessionId         Int
+  questionId        Int
+  selectedOptionIds Json
+  isCorrect         Boolean @default(false)
+
+  session  GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+model Product {
+  id          Int     @id @default(autoincrement())
+  brandId     Int
+  name        String
+  description String? @db.Text
+  couponPrice Int
+  stock       Int     @default(0)
+  image       String?
+  isActive    Boolean @default(true)
+
+  brand      Brand       @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+}
+
+model Order {
+  id            Int @id @default(autoincrement())
+  participantId Int
+  totalCoupons  Int
+  status        OrderStatus @default(pending)
+  createdAt     DateTime    @default(now())
+
+  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  items       OrderItem[]
 }
 
 enum OrderStatus {
@@ -33,325 +299,24 @@ enum OrderStatus {
   cancelled
 }
 
-enum NotificationType {
-  badge_earned
-  level_up
-  quiz_completed
-  quiz_played
-  quiz_created
-  quiz_deleted
-  order_confirmed
-  coupon_used
-  reward_earned
-  account_blocked
-  account_unblocked
-  system
-}
-
-enum ActivityAction {
-  user_login
-  user_register
-  brand_block_quizmaster
-  brand_unblock_quizmaster
-  brand_delete_quizmaster
-  brand_disable_quiz
-  brand_enable_quiz
-  brand_delete_quiz
-  brand_update_profile
-  quizmaster_create_quiz
-  quizmaster_update_quiz
-  quizmaster_delete_quiz
-  participant_take_quiz
-  participant_order
-  admin_action
-}
-
-// ─── User ───────────────────────────────────────────────────────
-
-model User {
-  id            Int       @id @default(autoincrement())
-  name          String?
-  email         String    @unique
-  password      String
-  role          Role      @default(participant)
-  isBlocked     Boolean   @default(false)
-  avatar        String?   @db.VarChar(500)
-
-  // Profile fields
-  phone         String?   @db.VarChar(40)
-  bio           String?   @db.Text
-  address       String?   @db.VarChar(255)
-  website       String?   @db.VarChar(255)
-  socialLinks   String?   @db.Text  // JSON string of { facebook, twitter, instagram, linkedin }
-
-  // Brand-specific
-  brandId       Int?
-  industry      String?   @db.VarChar(100)
-  description   String?   @db.Text
-  brand         User?     @relation("quizmasterToBrand", fields: [brandId], references: [id])
-  quizmasters   User[]    @relation("quizmasterToBrand")
-
-  // Gamification
-  totalPoints   Int       @default(0)
-  xp            Int       @default(0)
-  level         Int       @default(1)
-  coupons       Int       @default(0)
-
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @default(now()) @updatedAt
-
-  // Relations
-  quizzes         Quiz[]          @relation("quizmasterQuizzes")
-  brandQuizzes    Quiz[]          @relation("brandQuizzes")
-  attempts        Attempt[]       @relation("participantAttempts")
-  answers         Answer[]        @relation("participantAnswers")
-  pointsHistory   PointsHistory[] @relation("userPointsHistory")
-  badges          UserBadge[]     @relation("userBadges")
-  notifications   Notification[]  @relation("userNotifications")
-  orders          Order[]         @relation("userOrders")
-  products        Product[]       @relation("brandProducts")
-  activitiesOwn   ActivityLog[]   @relation("activityActor")
-  activitiesScope ActivityLog[]   @relation("activityScope")
-
-  @@map("users")
-}
-
-// ─── Quiz Module ────────────────────────────────────────────────
-
-model Quiz {
-  id                Int        @id @default(autoincrement())
-  title             String     @db.VarChar(255)
-  description       String?    @db.Text
-  brandId           Int
-  quizmasterId      Int
-  timeLimit         Int?
-  pointsPerQuestion Int        @default(1)
-  shuffleQuestions  Boolean    @default(false)
-  isActive          Boolean    @default(false)
-  difficulty        Difficulty @default(medium)
-  maxAttempts       Int        @default(0)
-  passingScore      Int        @default(50)
-  xpReward          Int        @default(10)
-  couponReward      Int        @default(0)
-  category          String?    @db.VarChar(100)
-  imageUrl          String?    @db.VarChar(500)
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
-
-  quizmaster    User       @relation("quizmasterQuizzes", fields: [quizmasterId], references: [id], onDelete: Cascade)
-  brand         User       @relation("brandQuizzes", fields: [brandId], references: [id], onDelete: Cascade)
-  questions     Question[]
-  attempts      Attempt[]
-
-  @@index([quizmasterId])
-  @@index([brandId])
-  @@index([difficulty])
-  @@index([category])
-  @@map("quizzes")
-}
-
-model Question {
-  id         Int        @id @default(autoincrement())
-  quizId     Int
-  text       String     @db.Text
-  points     Int        @default(1)
-  order      Int        @default(0)
-  difficulty Difficulty @default(medium)
-  hint       String?    @db.VarChar(500)
-  createdAt  DateTime   @default(now())
-
-  quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  options   Option[]
-  answers   Answer[]
-
-  @@index([quizId])
-  @@map("questions")
-}
-
-model Option {
-  id         Int      @id @default(autoincrement())
-  questionId Int
-  text       String   @db.VarChar(500)
-  isCorrect  Boolean  @default(false)
-
-  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  answers    Answer[]
-
-  @@index([questionId])
-  @@map("options")
-}
-
-model Attempt {
-  id          Int       @id @default(autoincrement())
-  quizId      Int
-  userId      Int
-  score       Int       @default(0)
-  maxScore    Int       @default(0)
-  completedAt DateTime?
-  duration    Int?
-  passed      Boolean   @default(false)
-  xpEarned    Int       @default(0)
-  couponsEarned Int     @default(0)
-  createdAt   DateTime  @default(now())
-
-  quiz      Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  user      User     @relation("participantAttempts", fields: [userId], references: [id], onDelete: Cascade)
-  answers   Answer[]
-
-  @@index([quizId])
-  @@index([userId])
-  @@index([completedAt])
-  @@map("attempts")
-}
-
-model Answer {
-  id         Int      @id @default(autoincrement())
-  attemptId  Int
-  questionId Int
-  optionId   Int
-  userId     Int?
-  isCorrect  Boolean  @default(false)
-  createdAt  DateTime @default(now())
-
-  attempt    Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  option     Option   @relation(fields: [optionId], references: [id], onDelete: Cascade)
-  user       User?    @relation("participantAnswers", fields: [userId], references: [id])
-
-  @@index([attemptId])
-  @@index([questionId])
-  @@map("answers")
-}
-
-// ─── Gamification ───────────────────────────────────────────────
-
-model PointsHistory {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  points    Int
-  reason    String   @db.VarChar(255)
-  attemptId Int?
-  createdAt DateTime @default(now())
-
-  user      User     @relation("userPointsHistory", fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@map("points_history")
-}
-
-model Badge {
-  id          Int      @id @default(autoincrement())
-  name        String   @db.VarChar(100)
-  description String   @db.VarChar(500)
-  icon        String   @db.VarChar(100)
-  condition   String   @db.VarChar(255)
-  xpReward    Int      @default(0)
-  createdAt   DateTime @default(now())
-
-  users       UserBadge[] @relation("badgeUsers")
-
-  @@map("badges")
-}
-
-model UserBadge {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  badgeId   Int
-  earnedAt  DateTime @default(now())
-
-  user      User     @relation("userBadges", fields: [userId], references: [id], onDelete: Cascade)
-  badge     Badge    @relation("badgeUsers", fields: [badgeId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, badgeId])
-  @@map("user_badges")
-}
-
-// ─── Marketplace / Store ────────────────────────────────────────
-
-model Product {
-  id          Int      @id @default(autoincrement())
-  brandId     Int
-  title       String   @db.VarChar(255)
-  description String?  @db.Text
-  price       Int
-  stock       Int      @default(0)
-  imageUrl    String?  @db.VarChar(500)
-  isActive    Boolean  @default(true)
-  category    String?  @db.VarChar(100)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  brand       User     @relation("brandProducts", fields: [brandId], references: [id], onDelete: Cascade)
-  orderItems  OrderItem[]
-
-  @@index([brandId])
-  @@map("products")
-}
-
-model Order {
-  id          Int         @id @default(autoincrement())
-  userId      Int
-  totalPrice  Int
-  status      OrderStatus @default(pending)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-
-  user        User        @relation("userOrders", fields: [userId], references: [id], onDelete: Cascade)
-  items       OrderItem[]
-
-  @@index([userId])
-  @@map("orders")
-}
-
 model OrderItem {
-  id        Int   @id @default(autoincrement())
-  orderId   Int
-  productId Int?
-  quantity  Int   @default(1)
-  price     Int
+  id               Int @id @default(autoincrement())
+  orderId          Int
+  productId        Int
+  quantity         Int @default(1)
+  unitCouponPrice  Int
 
-  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
-
-  @@map("order_items")
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
 }
-
-// ─── Notifications ──────────────────────────────────────────────
 
 model Notification {
-  id        Int              @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   userId    Int
-  type      NotificationType
-  title     String           @db.VarChar(255)
-  message   String           @db.Text
-  link      String?          @db.VarChar(500)
-  isRead    Boolean          @default(false)
-  createdAt DateTime         @default(now())
+  type      String
+  message   String   @db.Text
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
 
-  user      User             @relation("userNotifications", fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, isRead])
-  @@index([userId, createdAt])
-  @@map("notifications")
-}
-
-// ─── Activity / Audit Log ───────────────────────────────────────
-
-model ActivityLog {
-  id         Int            @id @default(autoincrement())
-  actorId    Int                                  // who performed the action
-  scopeId    Int?                                 // resource owner (brand id, target user, etc.)
-  action     ActivityAction
-  entityType String?        @db.VarChar(50)       // e.g. "quiz", "user", "order"
-  entityId   Int?
-  metadata   String?        @db.Text              // JSON string
-  createdAt  DateTime       @default(now())
-
-  actor      User           @relation("activityActor", fields: [actorId], references: [id], onDelete: Cascade)
-  scope      User?          @relation("activityScope", fields: [scopeId], references: [id], onDelete: SetNull)
-
-  @@index([actorId])
-  @@index([scopeId])
-  @@index([action])
-  @@map("activity_logs")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

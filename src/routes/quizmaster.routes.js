@@ -1,32 +1,33 @@
 const express = require("express");
 const router = express.Router();
+const auth = require("../middlewares/auth.middleware");
+const enforceActiveAccount = require("../middlewares/enforceActiveAccount.middleware");
+const permit = require("../middlewares/role.middleware");
+const uploadQuizmasterPhotoOptional = require("../middlewares/uploadQuizmasterPhoto.middleware");
+const requireQuizmasterProfileComplete = require("../middlewares/quizmasterProfileComplete.middleware");
+const requireQuizmasterApproved = require("../middlewares/quizmasterApproved.middleware");
 const QuizmasterController = require("../controllers/quizmaster.controller");
-const auth = require("../middlewares/auth");
-const permit = require("../middlewares/role");
-const validate = require("../middlewares/validate");
-const { createQuizmasterSchema, updateQuizmasterSchema } = require("../validations/quizmaster.validation");
+const QuizmasterProfileController = require("../controllers/quizmasterProfile.controller");
+const enforceBrandBillingFreshness = require("../middlewares/brandBillingFreshness.middleware");
 
-/**
- * Routes Admin — Gestion des quizmasters.
- * Toutes les routes sont protégées par `auth` (JWT) + `permit("admin")` (RBAC).
- *
- * POST   /api/v1/admin/quizmasters       — Créer un quizmaster
- * GET    /api/v1/admin/quizmasters       — Lister tous les quizmasters (paginé, filtre brandId)
- * GET    /api/v1/admin/quizmasters/:id   — Récupérer un quizmaster par ID
- * PUT    /api/v1/admin/quizmasters/:id   — Mettre à jour un quizmaster
- * DELETE /api/v1/admin/quizmasters/:id   — Supprimer un quizmaster
- */
+router.use(auth, enforceActiveAccount, permit("quizmaster"));
+router.get("/approval-status", QuizmasterProfileController.getApprovalStatus);
 
-// Middleware appliqué à toutes les routes de ce router
-router.use(auth, permit("admin"));
+router.use(requireQuizmasterApproved);
+router.use(enforceBrandBillingFreshness);
 
-// ─── ROUTES COLLECTION ────────────────────────────────────────────────────────
-router.post("/", validate(createQuizmasterSchema), QuizmasterController.create);
-router.get("/", QuizmasterController.getAll);
+router.get("/profile", QuizmasterProfileController.getProfile);
+router.patch("/profile", uploadQuizmasterPhotoOptional, QuizmasterProfileController.patchProfile);
 
-// ─── ROUTES PARAMÉTRÉES (:id) ─────────────────────────────────────────────────
-router.get("/:id", QuizmasterController.getById);
-router.put("/:id", validate(updateQuizmasterSchema), QuizmasterController.update);
-router.delete("/:id", QuizmasterController.delete);
+router.use(requireQuizmasterProfileComplete);
+
+router.get("/quizzes", QuizmasterController.list);
+router.post("/quizzes", QuizmasterController.create);
+router.get("/quizzes/:id", QuizmasterController.getOne);
+router.put("/quizzes/:id", QuizmasterController.update);
+router.delete("/quizzes/:id", QuizmasterController.remove);
+router.post("/quizzes/:quizId/questions", QuizmasterController.addQuestion);
+router.put("/questions/:questionId", QuizmasterController.updateQuestion);
+router.delete("/questions/:questionId", QuizmasterController.deleteQuestion);
 
 module.exports = router;

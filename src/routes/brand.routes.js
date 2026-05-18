@@ -1,32 +1,31 @@
 const express = require("express");
 const router = express.Router();
+const auth = require("../middlewares/auth.middleware");
+const permit = require("../middlewares/role.middleware");
+const enforceActiveAccount = require("../middlewares/enforceActiveAccount.middleware");
 const BrandController = require("../controllers/brand.controller");
-const auth = require("../middlewares/auth");
-const permit = require("../middlewares/role");
-const validate = require("../middlewares/validate");
-const { createBrandSchema, updateBrandSchema } = require("../validations/brand.validation");
+const uploadProductImageOptional = require("../middlewares/uploadProductImage.middleware");
+const enforceBrandBillingFreshness = require("../middlewares/brandBillingFreshness.middleware");
 
-/**
- * Routes Admin — Gestion des brands.
- * Toutes les routes sont protégées par `auth` (JWT) + `permit("admin")` (RBAC).
- *
- * POST   /api/v1/admin/brands       — Créer un brand
- * GET    /api/v1/admin/brands       — Lister tous les brands (paginé)
- * GET    /api/v1/admin/brands/:id   — Récupérer un brand par ID
- * PUT    /api/v1/admin/brands/:id   — Mettre à jour un brand
- * DELETE /api/v1/admin/brands/:id   — Supprimer un brand
- */
+router.use(auth, enforceActiveAccount, permit("brand"));
+router.use(enforceBrandBillingFreshness);
 
-// Middleware appliqué à toutes les routes de ce router
-router.use(auth, permit("admin"));
-
-// ─── ROUTES COLLECTION ────────────────────────────────────────────────────────
-router.post("/", validate(createBrandSchema), BrandController.create);
-router.get("/", BrandController.getAll);
-
-// ─── ROUTES PARAMÉTRÉES (:id) ─────────────────────────────────────────────────
-router.get("/:id", BrandController.getById);
-router.put("/:id", validate(updateBrandSchema), BrandController.update);
-router.delete("/:id", BrandController.delete);
+router.get("/dashboard", BrandController.dashboard);
+router.get("/subscription", BrandController.subscription);
+router.get("/billing", BrandController.billing);
+router.get("/quizmasters", BrandController.quizmasters);
+router.post("/quizmasters/:id/approve", BrandController.approveQm);
+router.post("/quizmasters/:id/reject", BrandController.rejectQm);
+router.post("/quizmasters/:id/block", BrandController.blockQm);
+router.post("/quizmasters/:id/unblock", BrandController.unblockQm);
+router.delete("/quizmasters/:id", BrandController.deleteQm);
+router.get("/quizzes", BrandController.quizzes);
+router.post("/quizzes/:id/activate", BrandController.activateQuiz);
+router.post("/quizzes/:id/deactivate", BrandController.deactivateQuiz);
+router.delete("/quizzes/:id", BrandController.deleteQuiz);
+router.get("/products", BrandController.products);
+router.post("/products", uploadProductImageOptional, BrandController.createProduct);
+router.put("/products/:id", uploadProductImageOptional, BrandController.updateProduct);
+router.delete("/products/:id", BrandController.deleteProduct);
 
 module.exports = router;

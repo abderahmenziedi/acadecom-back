@@ -8,6 +8,7 @@ node_modules/
 dist/
 *.log
 logs/
+uploads/
 
 # System files
 .DS_Store
